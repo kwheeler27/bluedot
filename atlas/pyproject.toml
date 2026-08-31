@@ -1,0 +1,15 @@
+[project]
+name = "bluedot-atlas"
+version = "0.0.1"
+description = "Blue Dot analysis and glue: Python side of the AI-native atlas + almanac (the Rust engine lives in crates/bluedot)."
+authors = [{ name = "Kevin Wheeler", email = "kwheeler27@gmail.com" }]
+requires-python = ">=3.13"
+# No dependencies yet — every dependency is discussed before it is added.
+dependencies = []
+
+[project.scripts]
+bluedot-atlas = "bluedot_atlas:main"
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"

@@ -1,0 +1,7 @@
+# Workspace root — a "virtual manifest": it has no [package] of its own, it only
+# groups member crates so they share one Cargo.lock and one target/ compile cache.
+[workspace]
+members = ["crates/bluedot"]
+# A virtual manifest has no edition to infer a resolver from, so Cargo requires
+# one to be spelled out. "3" is the resolver edition 2024 uses (MSRV-aware).
+resolver = "3"

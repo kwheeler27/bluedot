@@ -1,0 +1,27 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Data — raw downloads, Parquet, DuckDB files live here, never in git
+/data/
+*.duckdb
+*.duckdb.wal
+
+# Secrets
+.env
+.env.*
+
+# OS / editors
+.DS_Store
+.idea/

@@ -1,0 +1,9 @@
+[package]
+name = "bluedot"
+version = "0.0.1"
+edition = "2024"
+description = "Blue Dot ingestion/conformance engine: parses public statistical sources into the bitemporal fact schema."
+publish = false  # not on crates.io yet; guards against an accidental `cargo publish`
+
+# No [dependencies] yet — every dependency is discussed before it is added.
+[dependencies]
