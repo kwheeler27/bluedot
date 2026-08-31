@@ -75,7 +75,7 @@ Personal learning project → real product. Also a vehicle for learning Rust.
   narrative + per-figure provenance) and own MCP server.
 
 ## Key data sources
-Census ACS APIs (free, no-auth); Google Data Commons API + hosted MCP server
+Census ACS APIs (free; API key required as of Aug 2026 — keyless requests redirect to an HTML page); Google Data Commons API + hosted MCP server
 (api.datacommons.org/mcp); IPUMS/NHGIS (boundary files + crosswalks + snapshot
 archives); Eurostat, World Bank (later, international).
 

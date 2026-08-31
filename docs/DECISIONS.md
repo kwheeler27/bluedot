@@ -163,3 +163,35 @@ Each entry: **Context** (the forces) · **Decision** · **Consequences** (what g
 **Alternatives rejected.** A single crate at the repo root (converting to a workspace later means moving files); `rust/` and `python/` as peer directories (Cargo and rust-analyzer then need `--manifest-path` / `linkedProjects` everywhere); Python at the repo root beside `Cargo.toml` (two build systems' artifacts in one directory).
 
 **Revisit when.** A second crate arrives (nothing to change) or a PyO3 binding is added (add a `crates/bluedot-py` member).
+
+---
+
+## ADR-0012 — Entity identifiers use Google Data Commons' `geoId/` scheme
+
+**Date:** 2026-08-30 · **Status:** Accepted
+
+**Context.** Every fact needs an `entity_id`. The first source (Census ACS) identifies places by FIPS/GEOID strings whose level is implied by length — `09` a state, `09001` a county, `09001010100` a tract — which is fragile the moment two levels share a table. Google Data Commons, which the design brief names as a source to consume, already assigns stable identifiers to exactly these places.
+
+**Decision.** US Census geographies are identified as Data Commons does: `geoId/` + GEOID (`geoId/06037` for Los Angeles County, `geoId/09110` for Connecticut's Capitol Planning Region). Other sources will get their own prefixes when they arrive. The entity registry (ADR-0009) will map these to names, levels, parents, and boundary versions; until it exists the identifier itself is the registry.
+
+**Consequences.** Joining Blue Dot facts to Data Commons is a string equality. A geography that changes FIPS code is a new entity — which is the correct behavior: Connecticut's 2022 planning regions are different places from its counties, and the schema shows that rather than hiding it. The cost is coupling our identifiers to a scheme we don't control.
+
+**Alternatives rejected.** A house scheme (`us-county:09001`) — no interoperability gain for the same effort. Bare GEOIDs — level-by-length is fragile.
+
+**Revisit when.** Data Commons changes its scheme, or a non-US source needs identifiers Data Commons doesn't cover.
+
+---
+
+## ADR-0013 — `valid_time` is a half-open date interval `[valid_from, valid_to)`
+
+**Date:** 2026-08-30 · **Status:** Accepted
+
+**Context.** ACS 5-year estimates describe a 60-month period (the 2019–2023 release describes January 2019 through December 2023), not a point in time. Other sources will have annual, quarterly, monthly, or point-in-time observations. A single `valid_time` column would either lie about periods or need a parallel "period length" column.
+
+**Decision.** The valid-time component of the fact key is two dates, `valid_from` (inclusive) and `valid_to` (exclusive). A point-in-time observation on date D is `[D, D+1 day)`. A calendar year Y is `[Y-01-01, (Y+1)-01-01)`.
+
+**Consequences.** Overlapping ACS windows (2017–2021 vs 2019–2023) are represented honestly, and interval overlap is a plain comparison (`a.from < b.to AND b.from < a.to`). Half-open intervals abut without gaps or double-counting and sort correctly. The cost is two columns instead of one and the need for the semantic layer to declare, per indicator, which spans are comparable.
+
+**Alternatives rejected.** A single `valid_time` plus a period-length column — two columns anyway, worse ergonomics. Closed intervals — off-by-one bugs at every boundary. A string label like `2019-2023` — not comparable.
+
+**Revisit when.** Never on the principle; storage types (DATE vs TIMESTAMP) may change with sources at sub-day resolution.
