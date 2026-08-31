@@ -21,7 +21,16 @@ Rendering (deck.gl / MapLibre) and the MCP server come in later stages; nothing 
 ## Run
 
 ```sh
-cargo run -p bluedot                # Rust engine
-cargo test                          # Rust tests
-(cd atlas && uv run bluedot-atlas)  # Python package (uv installs Python 3.13 and syncs the venv on first run)
+# one-time: a free Census API key (required since May 2026) — https://api.census.gov/data/key_signup.html
+echo 'CENSUS_API_KEY=your-key' > .env          # .env is gitignored
+
+cargo run -p bluedot -- ingest acs --indicator B01003_001 --vintage 2021 --vintage 2023
+#   → data/facts/acs5-2021.jsonl, data/facts/acs5-2023.jsonl (fact schema v0, one JSON object per line)
+
+uv run --project atlas bluedot-atlas build-facts
+#   → data/facts.parquet, then prints the demo queries (vintage axis, Connecticut boundary change, annotations)
+
+cargo test && cargo clippy --all-targets -- -D warnings   # Rust tests + lint (offline; fixtures under crates/bluedot/tests/fixtures)
 ```
+
+Run everything from the repo root: the engine writes to `./data/` and the Python step reads from it. `uv` downloads and manages Python 3.13 itself; if you use pyenv, note that `atlas/.python-version` makes a bare `python3` inside `atlas/` complain — use `uv run`.
