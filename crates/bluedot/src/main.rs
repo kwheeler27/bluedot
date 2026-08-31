@@ -71,7 +71,7 @@ fn parse_args(args: &[String]) -> Result<Command, Error> {
     })
 }
 
-fn run() -> Result<(), Error> {
+fn run(key: Option<&str>) -> Result<(), Error> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Command::IngestAcs {
         indicator,
@@ -83,7 +83,7 @@ fn run() -> Result<(), Error> {
         return Ok(());
     };
 
-    let client = Client::new(config::census_api_key()?);
+    let client = Client::new(key.ok_or(Error::MissingApiKey)?.to_owned());
 
     // Fetch and conform everything first, write only if all of it succeeded:
     // a failure in the second vintage must not leave the first on disk as if
@@ -109,11 +109,19 @@ fn run() -> Result<(), Error> {
 }
 
 fn main() {
-    if let Err(err) = run() {
-        eprintln!("error: {err}");
+    // The key is loaded here, not inside `run`, so error reporting can scrub it
+    // from everything printed — one blanket rule, instead of trusting every
+    // layer (third-party error messages included) to keep it out of a message.
+    let key = config::census_api_key().ok();
+    let scrub = |text: String| match &key {
+        Some(k) => text.replace(k, "[REDACTED]"),
+        None => text,
+    };
+    if let Err(err) = run(key.as_deref()) {
+        eprintln!("error: {}", scrub(err.to_string()));
         let mut cause = err.source();
         while let Some(c) = cause {
-            eprintln!("  caused by: {c}");
+            eprintln!("  caused by: {}", scrub(c.to_string()));
             cause = c.source();
         }
         std::process::exit(1);

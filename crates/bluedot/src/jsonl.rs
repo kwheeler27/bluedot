@@ -42,13 +42,13 @@ pub fn write_atomic<T: Serialize>(path: &Path, rows: &[T]) -> Result<(), Error> 
             .map_err(io_err)
     })();
 
-    match result {
-        Ok(()) => fs::rename(&tmp, path).map_err(io_err),
-        Err(e) => {
-            let _ = fs::remove_file(&tmp); // best effort; the original error is what matters
-            Err(e)
-        }
+    // Whatever failed — writing or the final rename — remove the temp file;
+    // the original error is what matters, so the removal's own result is ignored.
+    let finished = result.and_then(|()| fs::rename(&tmp, path).map_err(io_err));
+    if finished.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
+    finished
 }
 
 #[cfg(test)]
@@ -65,6 +65,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "{\"a\":1}\n{\"a\":2}\n");
+        assert!(!path.with_extension("jsonl.tmp").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_failure_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("bluedot-jsonl-rename-{}", std::process::id()));
+        let path = dir.join("blocked.jsonl");
+        fs::create_dir_all(&path).unwrap(); // a directory where the file should go: rename must fail
+        let err = write_atomic(&path, &[serde_json::json!({"a": 1})]).unwrap_err();
+        assert!(matches!(err, Error::Io { .. }), "{err}");
         assert!(!path.with_extension("jsonl.tmp").exists());
         let _ = fs::remove_dir_all(&dir);
     }

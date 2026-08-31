@@ -173,6 +173,9 @@ impl Client {
                 url: url.to_owned(),
                 source,
             })?;
+        // Some APIs echo the request (query string included) in error bodies.
+        // Scrub the key before the body can reach an error message or a log.
+        let body = body.replace(&self.key, "[REDACTED]");
         if status != 200 {
             return Err(Error::UnexpectedStatus {
                 url: url.to_owned(),
@@ -288,6 +291,15 @@ fn parse_measure(
         };
     }
     match text.parse::<f64>() {
+        // Rust's float parser accepts "NaN", "inf" and "Infinity", and serde_json
+        // would then write them as JSON null — a null value with no annotation,
+        // the silent failure ADR-0005 forbids. They are not numbers to us.
+        Ok(v) if !v.is_finite() => Err(Error::BadNumber {
+            text: text.to_owned(),
+            field: field_name,
+            geoid: geoid.to_owned(),
+            variable: req.variable.clone(),
+        }),
         // Nine-digit negative numbers are the sentinel pattern; an unlisted one is
         // more likely a code we haven't catalogued than a real value.
         Ok(v) if v <= -100_000_000.0 => Err(Error::UnknownSentinel {
@@ -472,6 +484,18 @@ mod tests {
 
         let text = conform(&body(r#""n/a""#, r#""1""#), &req(2023), T0).unwrap_err();
         assert!(matches!(text, Error::BadNumber { .. }), "{text}");
+        for not_a_number in ["NaN", "nan", "inf", "-inf", "Infinity"] {
+            let err = conform(
+                &body(&format!("{not_a_number:?}"), r#""1""#),
+                &req(2023),
+                T0,
+            )
+            .unwrap_err();
+            assert!(
+                matches!(err, Error::BadNumber { .. }),
+                "{not_a_number}: {err}"
+            );
+        }
 
         let no_column = conform(
             r#"[["NAME","state","county"],["X","06","037"]]"#,
