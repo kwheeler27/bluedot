@@ -208,9 +208,7 @@ pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
                 )));
             }
         };
-        // `name` flows into an Error that outlives this loop, so the closure must
-        // promise 'static — satisfied because every call site passes a literal.
-        let count = |col: usize, name: &'static str| parse_count(cell(col), name, &entity_id, req);
+        let count = |col: usize, name: &str| parse_count(cell(col), name, &entity_id, req);
 
         // The estimates base is a point-in-time value for April 1, 2020 (census day)...
         facts.push(fact(
@@ -224,32 +222,31 @@ pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
         // a point in time is the one-day half-open interval).
         for &(year, col) in &year_cols {
             let y = i32::from(year);
+            // The error, if any, should name the exact column — POPESTIMATE2023,
+            // not just POPESTIMATE — so the bad cell is findable without a rescan.
+            let name = format!("POPESTIMATE{year}");
             facts.push(fact(
                 &entity_id,
                 "pep:POPESTIMATE",
                 Date::new(y, 7, 1),
                 Date::new(y, 7, 2),
-                count(col, "POPESTIMATE")?,
+                count(col, &name)?,
             ));
         }
     }
+    crate::fact::ensure_unique_keys(&facts)?;
     Ok(facts)
 }
 
 /// A population count: a non-negative integer, nothing else. PEP has no
 /// sentinel codes, so anything that isn't such an integer is a malformed file,
 /// not a value.
-fn parse_count(
-    text: &str,
-    field: &'static str,
-    entity_id: &str,
-    req: &Request,
-) -> Result<f64, Error> {
+fn parse_count(text: &str, field: &str, entity_id: &str, req: &Request) -> Result<f64, Error> {
     match text.trim().parse::<i64>() {
         Ok(v) if v >= 0 => Ok(v as f64),
         _ => Err(Error::BadNumber {
             text: text.to_owned(),
-            field,
+            field: field.to_owned(),
             geoid: entity_id.trim_start_matches("geoId/").to_owned(),
             variable: format!("co-est{}-alldata", req.vintage_year),
         }),
@@ -358,7 +355,16 @@ mod tests {
         assert!(matches!(negative, Error::BadNumber { .. }), "{negative}");
 
         let word = err(format!("{hdr}\n050,06,037,10,11,twelve,13\n"), 2022);
-        assert!(matches!(word, Error::BadNumber { .. }), "{word}");
+        assert!(
+            matches!(&word, Error::BadNumber { field, .. } if field == "POPESTIMATE2021"),
+            "error should name the exact column: {word}"
+        );
+
+        let dup = err(
+            format!("{hdr}\n050,06,037,10,11,12,13\n050,06,037,10,11,12,13\n"),
+            2022,
+        );
+        assert!(matches!(dup, Error::DuplicateFactKey { .. }), "{dup}");
 
         // header stops at 2022 but the request says vintage 2023: wrong file
         let years = err(format!("{hdr}\n050,06,037,10,11,12,13\n"), 2023);

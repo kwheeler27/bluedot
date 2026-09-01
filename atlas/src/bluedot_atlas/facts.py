@@ -94,7 +94,8 @@ DEMO_QUERIES: list[tuple[str, str]] = [
         FROM facts
         WHERE entity_id = 'geoId/06037' AND indicator_id = 'pep:POPESTIMATE'
           AND valid_from = DATE '2022-07-01' AND published_at <= DATE '2024-01-01'
-        ORDER BY published_at DESC
+        -- vintage DESC breaks the tie if two releases ever share a published_at
+        ORDER BY published_at DESC, vintage DESC
         LIMIT 1
         """,
     ),

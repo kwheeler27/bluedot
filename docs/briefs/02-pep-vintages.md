@@ -43,7 +43,7 @@ PEP via the API (dead for 2022+). Data Commons as the PEP source (carries only t
 Puerto Rico file; components of change (births/deaths/migration — later indicators); the 2010–2019 vintage series; the semantic layer; retries.
 
 ## Acceptance
-1. Four files: v2022 = 3,195×4 = 12,780 · v2023 = 15,975 · v2024 = 19,170 · v2025 = 22,365 — 70,290 PEP facts, 76,733 with ACS; fact key unique across both sources (existing duplicate check).
+1. Four files: v2022 = 3,195×4 = 12,780 · v2023 = 15,975 · v2024 = 19,170 · v2025 = 22,365 — 70,290 PEP facts, 76,733 with ACS; fact key unique across both sources — enforced inside the engine per batch (added after adversarial review), and re-checked across files by the Python build step.
 2. Same invariants as task 1; unknown SUMLEV, missing column, wrong year set, ragged row, negative or non-integer count, undecodable body → error, no output.
 3. Offline tests cover both encodings via the real fixtures, header-driven year discovery, and every refusal path.
 4. Demo query (d) returns the four LA values above; (e) for 2024-01-01 returns 9,721,138.

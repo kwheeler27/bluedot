@@ -257,6 +257,7 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
             retrieved_at,
         });
     }
+    crate::fact::ensure_unique_keys(&facts)?;
     Ok(facts)
 }
 
@@ -292,7 +293,7 @@ fn parse_measure(
         // the silent failure ADR-0005 forbids. They are not numbers to us.
         Ok(v) if !v.is_finite() => Err(Error::BadNumber {
             text: text.to_owned(),
-            field: field_name,
+            field: field_name.to_owned(),
             geoid: geoid.to_owned(),
             variable: req.variable.clone(),
         }),
@@ -307,7 +308,7 @@ fn parse_measure(
         Ok(v) => Ok((Some(v), None)),
         Err(_) => Err(Error::BadNumber {
             text: text.to_owned(),
-            field: field_name,
+            field: field_name.to_owned(),
             geoid: geoid.to_owned(),
             variable: req.variable.clone(),
         }),
@@ -503,6 +504,14 @@ mod tests {
             matches!(no_column, Error::BadResponseShape { .. }),
             "{no_column}"
         );
+
+        let dup = conform(
+            r#"[["NAME","B01003_001E","B01003_001M","state","county"],["X","1","2","06","037"],["X","1","2","06","037"]]"#,
+            &req(2023),
+            T0,
+        )
+        .unwrap_err();
+        assert!(matches!(dup, Error::DuplicateFactKey { .. }), "{dup}");
 
         let html = conform("<html>Missing Key</html>", &req(2023), T0).unwrap_err();
         assert!(matches!(html, Error::NotJson { .. }), "{html}");
