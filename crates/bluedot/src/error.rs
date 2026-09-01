@@ -54,8 +54,10 @@ pub enum Error {
         geoid: String,
         variable: String,
     },
-    /// We don't have release metadata (publication date) for this ACS vintage year.
-    UnsupportedVintage(u16),
+    /// Valid CSV framing could not be maintained (ragged rows, ...). `source` is the csv crate's error.
+    Csv { url: String, source: csv::Error },
+    /// We don't have release metadata (publication date) for this vintage of this dataset.
+    UnsupportedVintage { dataset: &'static str, year: u16 },
     /// File-system failure, with the path involved.
     Io {
         path: PathBuf,
@@ -129,10 +131,11 @@ impl fmt::Display for Error {
                     "{field} of {variable} for GEOID {geoid} is not a number: {text:?}"
                 )
             }
-            Error::UnsupportedVintage(year) => write!(
+            Error::Csv { url, .. } => write!(f, "malformed CSV from {url}"),
+            Error::UnsupportedVintage { dataset, year } => write!(
                 f,
-                "no release metadata for ACS 5-year vintage {year}; add it to acs::RELEASES \
-                 with its publication date"
+                "no release metadata for {dataset} vintage {year}; add its publication date \
+                 to that source's RELEASES table"
             ),
             Error::Io { path, .. } => write!(f, "I/O error at {}", path.display()),
             Error::Usage(msg) => write!(f, "{msg}"),
@@ -147,6 +150,7 @@ impl std::error::Error for Error {
         match self {
             Error::Http { source, .. } => Some(source),
             Error::NotJson { source, .. } => Some(source),
+            Error::Csv { source, .. } => Some(source),
             Error::Io { source, .. } => Some(source),
             _ => None,
         }

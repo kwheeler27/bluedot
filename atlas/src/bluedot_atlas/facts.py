@@ -39,7 +39,7 @@ DEMO_QUERIES: list[tuple[str, str]] = [
         """
         SELECT vintage, published_at, valid_from, valid_to, value, moe, moe_annotation
         FROM facts
-        WHERE entity_id = 'geoId/06037'
+        WHERE entity_id = 'geoId/06037' AND indicator_id = 'acs:B01003_001'
         ORDER BY vintage
         """,
     ),
@@ -75,6 +75,56 @@ DEMO_QUERIES: list[tuple[str, str]] = [
         FROM facts
         GROUP BY ALL
         ORDER BY vintage, value_annotation, moe_annotation
+        """,
+    ),
+    (
+        "(d) LA County, July 1 2022, as stated by each PEP vintage — a true revision",
+        """
+        SELECT vintage, published_at, value::BIGINT AS value
+        FROM facts
+        WHERE entity_id = 'geoId/06037' AND indicator_id = 'pep:POPESTIMATE'
+          AND valid_from = DATE '2022-07-01'
+        ORDER BY published_at
+        """,
+    ),
+    (
+        "(e) ...and what we BELIEVED about it on 2024-01-01 — the as-of-knowledge-date query",
+        """
+        SELECT vintage, published_at, value::BIGINT AS believed_value
+        FROM facts
+        WHERE entity_id = 'geoId/06037' AND indicator_id = 'pep:POPESTIMATE'
+          AND valid_from = DATE '2022-07-01' AND published_at <= DATE '2024-01-01'
+        ORDER BY published_at DESC
+        LIMIT 1
+        """,
+    ),
+    (
+        "(f) Largest revisions of July-1-2024 populations between Vintage 2024 and Vintage 2025",
+        """
+        SELECT f24.entity_id,
+               f24.value::BIGINT AS vintage_2024_said,
+               f25.value::BIGINT AS vintage_2025_says,
+               (f25.value - f24.value)::BIGINT AS revision
+        FROM facts f24
+        JOIN facts f25 USING (entity_id, indicator_id, valid_from)
+        WHERE indicator_id = 'pep:POPESTIMATE' AND valid_from = DATE '2024-07-01'
+          AND f24.vintage = 'pep-2024' AND f25.vintage = 'pep-2025'
+        ORDER BY abs(f25.value - f24.value) DESC
+        LIMIT 5
+        """,
+    ),
+    (
+        "(g) CAUTION — 'LA County population, 2023' from both sources: a 5-year-period"
+        " estimate and a July-1 point are different concepts. Refusing to conflate them"
+        " is the semantic layer's future job (ADR-0004/0005).",
+        """
+        SELECT indicator_id, vintage, valid_from, valid_to, value::BIGINT AS value
+        FROM facts
+        WHERE entity_id = 'geoId/06037'
+          AND ((indicator_id = 'acs:B01003_001' AND vintage = 'acs5-2023')
+               OR (indicator_id = 'pep:POPESTIMATE' AND vintage = 'pep-2025'
+                   AND valid_from = DATE '2023-07-01'))
+        ORDER BY indicator_id
         """,
     ),
 ]
