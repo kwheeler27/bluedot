@@ -15,6 +15,9 @@ commands:
                                (written by the Rust engine) into DIR/facts.parquet
                                and DIR/entities.parquet, then run the demo queries
   page <entity_id> <indicator_id> <valid_from> [--data DIR]
+  link [--data DIR]            cross-source entity resolution v0: link county
+                               buildings to ECHO facilities; writes
+                               DIR/claims/link-<date>.jsonl (then re-run build-facts)
                                compile a static fact page (the vintage ladder) to
                                DIR/pages/, e.g.:
                                page geoId/06037 pep:POPESTIMATE 2022-07-01
@@ -49,6 +52,14 @@ def main() -> None:
         from .facts import build_facts  # imported lazily so usage output never loads duckdb
 
         build_facts(data_dir)
+        return
+
+    if command == "link":
+        if rest:
+            sys.exit(f"bluedot-atlas link: unexpected arguments {rest!r}\n{USAGE}")
+        from .linkage import build_links
+
+        build_links(data_dir)
         return
 
     if command == "page":

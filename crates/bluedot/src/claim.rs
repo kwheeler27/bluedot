@@ -57,6 +57,10 @@ pub enum Confidence {
     Reported,
     /// Circulating without an identifiable record or on-record statement.
     Rumored,
+    /// An inference made by Blue Dot's own code (e.g. record linkage) — never
+    /// a source's statement. The method and evidence ride in `stated_by`;
+    /// interpretations are attributed, like everything else.
+    Inferred,
 }
 
 /// Refuse a batch whose claim key is not unique — same discipline as

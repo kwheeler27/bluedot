@@ -275,4 +275,19 @@ def build_facts(data_dir: Path) -> Path:
             FROM sg LEFT JOIN g USING (entity_id)
             GROUP BY 1 ORDER BY buildings DESC
         """).show()
+        print("(k) One facility, two sources — the dossier view through dc:same_as")
+        con.sql("""
+            WITH link AS (
+                SELECT entity_id AS pwc_id, value_text AS frs_id
+                FROM claims WHERE attribute_id = 'dc:same_as'
+                ORDER BY entity_id LIMIT 1
+            )
+            SELECT c.entity_id, c.attribute_id,
+                   coalesce(c.value_text, c.value_num::VARCHAR) AS value,
+                   c.stated_by, c.published_at
+            FROM claims c, link
+            WHERE c.entity_id IN (link.pwc_id, link.frs_id)
+              AND c.attribute_id IN ('dc:recorded_name','dc:stage','dc:gfa_sqft','dc:occupied_date','dc:year_built')
+            ORDER BY c.entity_id, c.attribute_id
+        """).show(max_width=140)
     return out
