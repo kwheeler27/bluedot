@@ -198,7 +198,15 @@ fn conform_layer(
 
     for (i, row) in rows.iter().enumerate() {
         let attrs = &row["attributes"];
-        let s = |key: &str| attrs[key].as_str().map(str::trim).filter(|v| !v.is_empty());
+        // ArcGIS emits the literal string "<Null>" in some text fields (the
+        // captured fixture has PermitCase: "<Null>") — treat it as absent, or
+        // it leaks into claim provenance as a fake record id.
+        let s = |key: &str| {
+            attrs[key]
+                .as_str()
+                .map(str::trim)
+                .filter(|v| !v.is_empty() && *v != "<Null>")
+        };
         let n = |key: &str| attrs[key].as_f64().filter(|v| *v != 0.0); // the county uses 0 for "not set"
         let need = |key: &str| {
             s(key)
@@ -246,6 +254,10 @@ fn conform_layer(
                     .as_array()
                     .filter(|r| !r.is_empty())
                     .ok_or_else(|| shape_err(format!("row {}: no polygon ring", i + 1)))?;
+                // Closed rings repeat the first vertex at the end — drop the
+                // repeat so it isn't double-weighted in the mean.
+                let closed = ring.len() > 1 && ring.first() == ring.last();
+                let ring = &ring[..ring.len() - usize::from(closed)];
                 let mut sx = 0.0;
                 let mut sy = 0.0;
                 for v in ring {
@@ -260,7 +272,10 @@ fn conform_layer(
             }
         };
 
-        // The county's own edit date is the closest thing to a publication date.
+        // The county's own edit date is the closest thing to a publication
+        // date. It is a UTC instant with real time-of-day, so an edit made
+        // after ~7-8pm Eastern lands on the next UTC calendar day — accepted,
+        // the same UTC-day convention the snapshot vintage uses.
         let published_at = attrs["LastEditDate"]
             .as_i64()
             .map(|ms| Date::from_unix_days(ms.div_euclid(86_400_000)))
@@ -390,7 +405,9 @@ fn conform_layer(
                 if let Some(g) = n("PlannedGFA") {
                     push_num("dc:gfa_planned_sqft", g, "sqft");
                 }
-                if let Some(g) = n("RemainingGFA") {
+                // RemainingGFA is the one numeric where 0 is a real value — a
+                // fully built-out campus — so it bypasses the 0-as-null rule.
+                if let Some(g) = attrs["RemainingGFA"].as_f64() {
                     push_num("dc:gfa_remaining_sqft", g, "sqft");
                 }
                 if let Some(a) = n("GISAcreage") {
