@@ -14,11 +14,13 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use bluedot::fact::Conformed;
-use bluedot::{Error, acs, config, jsonl, pep};
+use bluedot::time::Timestamp;
+use bluedot::{Error, acs, config, echo, jsonl, pep};
 
 const USAGE: &str = "usage:
   bluedot ingest acs --indicator <TABLE_VAR> --vintage <YEAR> [--vintage <YEAR>...] [--out <DIR>]
   bluedot ingest pep --vintage <YEAR> [--vintage <YEAR>...] [--out <DIR>]
+  bluedot ingest echo [--naics <CODE>] [--out <DIR>]         # snapshot-dated; default NAICS 518210
 
 Writes <DIR>/facts/<vintage>.jsonl and <DIR>/entities/<vintage>.jsonl (default
 DIR: data). All vintages are fetched and conformed before any file is written.
@@ -36,6 +38,10 @@ enum Command {
         vintages: Vec<u16>,
         out_dir: PathBuf,
     },
+    IngestEcho {
+        naics: String,
+        out_dir: PathBuf,
+    },
 }
 
 fn parse_args(args: &[String]) -> Result<Command, Error> {
@@ -45,11 +51,12 @@ fn parse_args(args: &[String]) -> Result<Command, Error> {
         return Ok(Command::Usage);
     };
     let source = match (first.as_str(), second.as_str()) {
-        ("ingest", s @ ("acs" | "pep")) => s, // `s @ pattern` binds what the pattern matched
+        ("ingest", s @ ("acs" | "pep" | "echo")) => s, // `s @ pattern` binds what the pattern matched
         _ => return Err(usage(&format!("unknown command {first:?} {second:?}"))),
     };
 
     let (mut indicator, mut vintages, mut out_dir) = (None, Vec::new(), PathBuf::from("data"));
+    let mut naics = String::from("518210");
     let mut it = rest.iter();
     while let Some(flag) = it.next() {
         let value = it
@@ -57,6 +64,10 @@ fn parse_args(args: &[String]) -> Result<Command, Error> {
             .ok_or_else(|| usage(&format!("{flag} needs a value")))?;
         match flag.as_str() {
             "--indicator" if source == "acs" => indicator = Some(value.clone()),
+            "--naics" if source == "echo" => naics = value.clone(),
+            "--vintage" if source == "echo" => {
+                return Err(usage("echo is snapshot-dated; it takes no --vintage"));
+            }
             "--vintage" => {
                 let year: u16 = value
                     .parse()
@@ -73,6 +84,9 @@ fn parse_args(args: &[String]) -> Result<Command, Error> {
                 )));
             }
         }
+    }
+    if source == "echo" {
+        return Ok(Command::IngestEcho { naics, out_dir });
     }
     if vintages.is_empty() {
         return Err(usage("at least one --vintage is required"));
@@ -137,6 +151,34 @@ fn run(key: Option<&str>) -> Result<(), Error> {
                 outputs.push((req.vintage(), conformed));
             }
             write_outputs(&out_dir, &outputs)
+        }
+        Command::IngestEcho { naics, out_dir } => {
+            let req = echo::Request::new(&naics, Timestamp::now().date())?;
+            let started = Instant::now();
+            let conformed = echo::Client::new().facilities(&req)?;
+            eprintln!(
+                "{}: {} entities, {} claims fetched in {:.1}s",
+                req.vintage(),
+                conformed.entities.len(),
+                conformed.claims.len(),
+                started.elapsed().as_secs_f64()
+            );
+            let entities_path = out_dir
+                .join("entities")
+                .join(format!("{}.jsonl", req.vintage()));
+            jsonl::write_atomic(&entities_path, &conformed.entities)?;
+            let claims_path = out_dir
+                .join("claims")
+                .join(format!("{}.jsonl", req.vintage()));
+            jsonl::write_atomic(&claims_path, &conformed.claims)?;
+            println!(
+                "wrote {} ({} entities) + {} ({} claims)",
+                entities_path.display(),
+                conformed.entities.len(),
+                claims_path.display(),
+                conformed.claims.len()
+            );
+            Ok(())
         }
         Command::IngestPep { vintages, out_dir } => {
             let client = pep::Client::new();

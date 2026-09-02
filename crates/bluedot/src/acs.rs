@@ -252,6 +252,8 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Con
             boundary_year: req.vintage_year,
             vintage: req.vintage(),
             source_dataset: DATASET.to_owned(),
+            lat: None,
+            lon: None,
         });
         facts.push(Fact {
             entity_id,

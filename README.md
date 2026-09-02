@@ -29,6 +29,10 @@ cargo run -p bluedot -- ingest pep --vintage 2022 --vintage 2023 --vintage 2024 
 #   → data/facts/<vintage>.jsonl (fact schema v0) + data/entities/<vintage>.jsonl (registry v0)
 #     pep files are public — no key needed for that one
 
+cargo run -p bluedot -- ingest echo
+#   → data/entities/echo-<today>.jsonl + data/claims/echo-<today>.jsonl — EPA air-permitted
+#     data centers (Data Center Atlas DC-0); snapshot-dated, no key needed
+
 uv run --project atlas bluedot-atlas build-facts
 #   → data/facts.parquet + data/entities.parquet, then the demo queries
 

@@ -38,6 +38,28 @@ ENTITY_COLUMNS: dict[str, str] = {
     "boundary_year": "INTEGER",
     "vintage": "VARCHAR",
     "source_dataset": "VARCHAR",
+    "lat": "DOUBLE",
+    "lon": "DOUBLE",
+}
+
+# Claims (ADR-0015): someone asserts something about an entity — bitemporal,
+# source-recorded, confidence-tiered, never merged at ingest.
+CLAIM_COLUMNS: dict[str, str] = {
+    "entity_id": "VARCHAR",
+    "attribute_id": "VARCHAR",
+    "valid_from": "DATE",
+    "valid_to": "DATE",
+    "vintage": "VARCHAR",
+    "source_record": "VARCHAR",
+    "value_text": "VARCHAR",
+    "value_num": "DOUBLE",
+    "unit": "VARCHAR",
+    "stated_by": "VARCHAR",
+    "confidence": "VARCHAR",
+    "published_at": "DATE",
+    "source_dataset": "VARCHAR",
+    "source_url": "VARCHAR",
+    "retrieved_at": "TIMESTAMP",
 }
 
 # The fact key (ADR-0001, ADR-0013). valid_time is the half-open [valid_from, valid_to).
@@ -192,6 +214,24 @@ def build_facts(data_dir: Path) -> Path:
     (n_entities,) = con.execute("SELECT count(*) FROM entities").fetchone()
     print(f"wrote {eout} — {n_entities} registry rows from {len(efiles)} files")
 
+    claim_files = sorted((data_dir / "claims").glob("*.jsonl"))
+    if claim_files:
+        ccols = ", ".join(f"'{n}': '{t}'" for n, t in CLAIM_COLUMNS.items())
+        con.execute(
+            f"CREATE TABLE claims AS SELECT * FROM read_json(?, format = 'newline_delimited', columns = {{{ccols}}})",
+            [[str(f) for f in claim_files]],
+        )
+        (cdups,) = con.execute(
+            "SELECT count(*) FROM (SELECT entity_id, attribute_id, valid_from, valid_to, vintage, source_record "
+            "FROM claims GROUP BY ALL HAVING count(*) > 1)"
+        ).fetchone()
+        if cdups:
+            raise SystemExit(f"{cdups} duplicate claim keys — refusing to write claims.parquet")
+        cout = data_dir / "claims.parquet"
+        con.execute(f"COPY claims TO '{str(cout).replace(chr(39), chr(39) * 2)}' (FORMAT PARQUET)")
+        (n_claims,) = con.execute("SELECT count(*) FROM claims").fetchone()
+        print(f"wrote {cout} — {n_claims} claims from {len(claim_files)} files")
+
     (n_rows,) = con.execute("SELECT count(*) FROM facts").fetchone()
     per_file = con.execute("SELECT vintage, count(*) FROM facts GROUP BY ALL ORDER BY vintage").fetchall()
     print(f"wrote {out} — {n_rows} facts from {len(files)} files: "
@@ -200,4 +240,27 @@ def build_facts(data_dir: Path) -> Path:
     for title, sql in DEMO_QUERIES:
         print(f"\n{title}")
         con.sql(sql).show()
+
+    if claim_files:
+        print("\n(h) Data centers by lifecycle stage — ECHO air permits, latest snapshot")
+        con.sql("""
+            SELECT value_text AS stage, count(DISTINCT entity_id) AS facilities
+            FROM claims WHERE attribute_id = 'dc:stage'
+              AND vintage = (SELECT max(vintage) FROM claims)
+            GROUP BY 1 ORDER BY 2 DESC
+        """).show()
+        print("(i) Top states by air-permitted data centers, with pipeline split")
+        con.sql("""
+            WITH latest AS (SELECT max(vintage) AS v FROM claims),
+            st AS (SELECT entity_id, max(value_text) AS state FROM claims, latest
+                   WHERE attribute_id = 'dc:state' AND vintage = latest.v GROUP BY 1),
+            sg AS (SELECT entity_id, max(value_text) AS stage FROM claims, latest
+                   WHERE attribute_id = 'dc:stage' AND vintage = latest.v GROUP BY 1)
+            SELECT st.state,
+                   count(*) AS facilities,
+                   count(*) FILTER (sg.stage = 'operating') AS operating,
+                   count(*) FILTER (sg.stage IN ('planned_facility','under_construction')) AS pipeline
+            FROM st JOIN sg USING (entity_id)
+            GROUP BY 1 ORDER BY facilities DESC LIMIT 8
+        """).show()
     return out
