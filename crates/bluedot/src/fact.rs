@@ -129,8 +129,10 @@ pub struct Entity {
 pub enum Level {
     State,
     County,
-    /// A physical site (e.g. a data center), not an administrative area.
+    /// A physical site (e.g. a data center building), not an administrative area.
     Facility,
+    /// A multi-building development (e.g. a data center campus).
+    Campus,
 }
 
 /// What one conform pass produces: the facts, and the entities they mention.

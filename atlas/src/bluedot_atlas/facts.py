@@ -245,8 +245,8 @@ def build_facts(data_dir: Path) -> Path:
         print("\n(h) Data centers by lifecycle stage — ECHO air permits, latest snapshot")
         con.sql("""
             SELECT value_text AS stage, count(DISTINCT entity_id) AS facilities
-            FROM claims WHERE attribute_id = 'dc:stage'
-              AND vintage = (SELECT max(vintage) FROM claims)
+            FROM claims WHERE attribute_id = 'dc:stage' AND source_dataset = 'epa/echo/air'
+              AND vintage = (SELECT max(vintage) FROM claims WHERE source_dataset = 'epa/echo/air')
             GROUP BY 1 ORDER BY 2 DESC
         """).show()
         print("(i) Top states by air-permitted data centers, with pipeline split")

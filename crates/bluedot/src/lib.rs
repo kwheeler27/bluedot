@@ -7,6 +7,7 @@
 //! Module map (one job each):
 //! - [`acs`]    — Census ACS API client + conformance into the fact schema
 //! - [`echo`]   — EPA ECHO air-permit facilities (Data Center Atlas, DC-0)
+//! - [`pwc`]    — Prince William County VA data-center layers (DC-0)
 //! - [`claim`]  — the claim record: someone asserts something about an entity
 //! - [`pep`]    — Census PEP vintage CSV files (true revisions) + conformance
 //! - [`http`]   — the shared "don't be helpful" HTTP agent
@@ -28,6 +29,7 @@ pub mod fact;
 pub mod http;
 pub mod jsonl;
 pub mod pep;
+pub mod pwc;
 pub mod time;
 
 // Re-export so callers write `bluedot::Error` instead of `bluedot::error::Error`.
