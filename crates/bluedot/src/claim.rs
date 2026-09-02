@@ -74,11 +74,12 @@ pub fn ensure_unique_claim_keys(claims: &[Claim]) -> Result<(), Error> {
             c.source_record.as_str(),
         );
         if !seen.insert(key) {
-            return Err(Error::DuplicateFactKey {
+            return Err(Error::DuplicateClaimKey {
                 entity_id: c.entity_id.clone(),
-                indicator_id: format!("{} (claim, record {})", c.attribute_id, c.source_record),
+                attribute_id: c.attribute_id.clone(),
                 valid_from: c.valid_from,
                 vintage: c.vintage.clone(),
+                source_record: c.source_record.clone(),
             });
         }
     }

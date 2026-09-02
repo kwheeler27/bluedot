@@ -7,11 +7,13 @@
 //! and returns a row count plus an ephemeral query id; `get_qid` returns every
 //! row as JSON in one page (verified 2026-09-02: 468 rows, all geocoded).
 //!
-//! Each fetch is a **snapshot**: the vintage is the retrieval date, and each
-//! stage claim's valid time is that one day — ECHO refreshes weekly and says
-//! nothing about when a status changed, so we assert only "this is what the
-//! record said on this date". Snapshots accumulate into the pipeline history
-//! (plan §DC-1).
+//! Each fetch is a **snapshot**: the vintage is the retrieval date **in UTC**
+//! (an evening US run lands on the next UTC day — the vintage is a label and
+//! consistency beats local intuition), and each claim's valid time is that one
+//! day — ECHO refreshes weekly and says nothing about when a status changed,
+//! so we assert only "this is what the record said on this date". A same-day
+//! rerun atomically replaces that day's snapshot; snapshots accumulate into
+//! the pipeline history (plan §DC-1).
 
 use serde_json::Value;
 
@@ -174,6 +176,11 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Con
     let rows = value["Results"]["Facilities"]
         .as_array()
         .ok_or_else(|| shape_err("no Results.Facilities array".into()))?;
+    // Zero rows from a source whose premise is a near-census of an active
+    // industry is a broken filter or an outage dressed as success, not data.
+    if rows.is_empty() {
+        return Err(shape_err("zero facilities returned".into()));
+    }
 
     let (valid_from, valid_to) = (req.snapshot, req.snapshot.next_day());
     let vintage = req.vintage();
@@ -217,7 +224,7 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Con
         if !entities.iter().any(|e| e.entity_id == entity_id) {
             entities.push(Entity {
                 entity_id: entity_id.clone(),
-                name,
+                name: name.clone(),
                 level: Level::Facility,
                 boundary_year: self_year(req.snapshot),
                 vintage: vintage.clone(),
@@ -227,17 +234,23 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Con
             });
         }
 
-        // A companion state claim keeps by-state queries possible before the
-        // spatial join (H3 / boundary geometry) exists to derive geography
-        // from coordinates. Same record, same key discipline.
-        let base = Claim {
+        // One template, three claims per record via struct-update syntax
+        // (`..template.clone()` starts from a clone and overrides the named
+        // fields). dc:state keeps by-state queries possible before the spatial
+        // join exists; dc:recorded_name preserves EVERY record's stated name —
+        // the entity keeps the first record's name (the registry holds one per
+        // source+vintage, ADR-0014), so disagreements between a facility's
+        // records stay visible as claims instead of being lost. The first
+        // record's coordinates win; coordinate disagreement between records of
+        // one FRS id is accepted undetected in v0.
+        let template = Claim {
             entity_id: entity_id.clone(),
-            attribute_id: "dc:state".to_owned(),
+            attribute_id: String::new(),
             valid_from,
             valid_to,
             vintage: vintage.clone(),
             source_record: source_id.clone(),
-            value_text: Some(text("AIRState")?),
+            value_text: None,
             value_num: None,
             unit: None,
             stated_by: "EPA ICIS-Air (state-reported)".to_owned(),
@@ -247,23 +260,20 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Con
             source_url: url.clone(),
             retrieved_at,
         };
-        claims.push(base.clone());
         claims.push(Claim {
-            entity_id,
             attribute_id: "dc:stage".to_owned(),
-            valid_from,
-            valid_to,
-            vintage: vintage.clone(),
-            source_record: source_id,
             value_text: Some(stage.to_owned()),
-            value_num: None,
-            unit: None,
-            stated_by: "EPA ICIS-Air (state-reported)".to_owned(),
-            confidence: Confidence::ConfirmedByRecord,
-            published_at: req.snapshot,
-            source_dataset: DATASET.to_owned(),
-            source_url: url.clone(),
-            retrieved_at,
+            ..template.clone()
+        });
+        claims.push(Claim {
+            attribute_id: "dc:state".to_owned(),
+            value_text: Some(text("AIRState")?),
+            ..template.clone()
+        });
+        claims.push(Claim {
+            attribute_id: "dc:recorded_name".to_owned(),
+            value_text: Some(name.clone()),
+            ..template
         });
     }
     ensure_unique_claim_keys(&claims)?;
@@ -300,7 +310,27 @@ mod tests {
             .iter()
             .filter(|cl| cl.attribute_id == "dc:state")
             .collect();
-        assert_eq!(c.claims.len(), stage_claims.len() + state_claims.len());
+        let name_claims: Vec<_> = c
+            .claims
+            .iter()
+            .filter(|cl| cl.attribute_id == "dc:recorded_name")
+            .collect();
+        assert_eq!(
+            c.claims.len(),
+            stage_claims.len() + state_claims.len() + name_claims.len()
+        );
+        assert_eq!(stage_claims.len(), name_claims.len());
+        // the twice-recorded FRS id keeps BOTH stated names, as claims
+        let names: Vec<_> = name_claims
+            .iter()
+            .filter(|cl| cl.entity_id == "frs/110031223771")
+            .filter_map(|cl| cl.value_text.as_deref())
+            .collect();
+        assert!(
+            names.contains(&"AMAZON DATA SERVICES, INC. IAD-6 IAD-13 IAD-54"),
+            "{names:?}"
+        );
+        assert!(names.contains(&"VADATA INC MEG FOUR"), "{names:?}");
         assert_eq!(
             stage_claims.len(),
             state_claims.len(),
