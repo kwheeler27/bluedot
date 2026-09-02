@@ -513,6 +513,29 @@ mod tests {
             Some("under_construction")
         );
 
+        // a "<Null>" permit case falls back to the record gid, never the sentinel
+        let va89 = out
+            .entities
+            .iter()
+            .find(|e| e.name.contains("VA-8/9"))
+            .unwrap();
+        let pfrag = va89.entity_id.strip_prefix("pwc/bld/").unwrap();
+        let ps = by(pfrag, "dc:permit_status").unwrap();
+        assert_ne!(ps.source_record, "<Null>");
+        assert_eq!(ps.source_record, pfrag);
+
+        // a completed campus's RemainingGFA of 0 is a real claim, not an absence
+        let wellington = out
+            .entities
+            .iter()
+            .find(|e| e.name.contains("Wellington South"))
+            .unwrap();
+        let wfrag = wellington.entity_id.strip_prefix("pwc/campus/").unwrap();
+        assert_eq!(
+            by(wfrag, "dc:gfa_remaining_sqft").unwrap().value_num,
+            Some(0.0)
+        );
+
         // campuses: stage + zoning case + planned GFA
         let campus = out
             .entities

@@ -10,7 +10,7 @@ SOURCES-government.md ranked it #2 for value-for-effort, and it delivers what EC
 
 ## Solution notes
 - Entities: `pwc/bld/<GlobalID>` (level `facility`) and `pwc/campus/<GlobalID>` (new level `campus`), GUID braces stripped; names as recorded (falling back to address), geocoded — campus label points are the mean of the outer polygon ring (an approximation for display, documented).
-- Claims (per record, snapshot vintage `pwc-<UTC date>`): `dc:stage` (closed vocab per layer, fail-loudly), `dc:recorded_name`, `dc:address`, `dc:parcel_gpin`, `dc:year_built`, `dc:occupied_date`, `dc:permit_status` (the named permit case is the asserting `source_record`), `dc:gfa_sqft` (+`_approved`/`_permitted`/`_taxed`), campus `dc:zoning_case`, `dc:gfa_planned_sqft`, `dc:gfa_remaining_sqft`, `dc:acreage`. The county's `LastEditDate` is each claim's `published_at`; `0` is treated as the county's null for numerics.
+- Claims (per record, snapshot vintage `pwc-<UTC date>`): `dc:stage` (closed vocab per layer, fail-loudly), `dc:recorded_name`, `dc:address`, `dc:parcel_gpin`, `dc:year_built`, `dc:occupied_date`, `dc:permit_status` (the named permit case is the asserting `source_record`), `dc:gfa_sqft` (+`_approved`/`_permitted`/`_taxed`), campus `dc:zoning_case`, `dc:gfa_planned_sqft`, `dc:gfa_remaining_sqft`, `dc:acreage`. The county's `LastEditDate` is each claim's `published_at` (a UTC instant — the derived day can sit one ahead of county-local time, accepted and documented); `0` is the county's null for numerics — except `RemainingGFA`, where 0 is a real value (a fully built-out campus) and is kept.
 - Layer 11 (zoning applications, 61 rows) is deliberately deferred to DC-1 — it is docket/pipeline material.
 
 ## Acceptance
