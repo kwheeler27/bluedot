@@ -11,6 +11,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use crate::time::Date;
+
 #[derive(Debug)]
 pub enum Error {
     /// `CENSUS_API_KEY` is neither in the environment nor in `./.env`.
@@ -47,15 +49,27 @@ pub enum Error {
         geoid: String,
         variable: String,
     },
-    /// Neither a number nor a known annotation.
+    /// Neither a number nor a known annotation. `field` is owned so it can name
+    /// the exact source column (e.g. `POPESTIMATE2023`), not just a category.
     BadNumber {
         text: String,
-        field: &'static str,
+        field: String,
         geoid: String,
         variable: String,
     },
-    /// We don't have release metadata (publication date) for this ACS vintage year.
-    UnsupportedVintage(u16),
+    /// The same fact key appeared twice in one conformed batch — the source
+    /// repeated a row. The engine's own success must guarantee ADR-0001's key,
+    /// not a later, skippable build step.
+    DuplicateFactKey {
+        entity_id: String,
+        indicator_id: String,
+        valid_from: Date,
+        vintage: String,
+    },
+    /// Valid CSV framing could not be maintained (ragged rows, ...). `source` is the csv crate's error.
+    Csv { url: String, source: csv::Error },
+    /// We don't have release metadata (publication date) for this vintage of this dataset.
+    UnsupportedVintage { dataset: &'static str, year: u16 },
     /// File-system failure, with the path involved.
     Io {
         path: PathBuf,
@@ -129,10 +143,21 @@ impl fmt::Display for Error {
                     "{field} of {variable} for GEOID {geoid} is not a number: {text:?}"
                 )
             }
-            Error::UnsupportedVintage(year) => write!(
+            Error::Csv { url, .. } => write!(f, "malformed CSV from {url}"),
+            Error::DuplicateFactKey {
+                entity_id,
+                indicator_id,
+                valid_from,
+                vintage,
+            } => write!(
                 f,
-                "no release metadata for ACS 5-year vintage {year}; add it to acs::RELEASES \
-                 with its publication date"
+                "duplicate fact key: {entity_id} {indicator_id} valid_from {valid_from} \
+                 vintage {vintage} — the source repeated a row; refusing the whole batch"
+            ),
+            Error::UnsupportedVintage { dataset, year } => write!(
+                f,
+                "no release metadata for {dataset} vintage {year}; add its publication date \
+                 to that source's RELEASES table"
             ),
             Error::Io { path, .. } => write!(f, "I/O error at {}", path.display()),
             Error::Usage(msg) => write!(f, "{msg}"),
@@ -147,6 +172,7 @@ impl std::error::Error for Error {
         match self {
             Error::Http { source, .. } => Some(source),
             Error::NotJson { source, .. } => Some(source),
+            Error::Csv { source, .. } => Some(source),
             Error::Io { source, .. } => Some(source),
             _ => None,
         }

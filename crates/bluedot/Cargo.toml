@@ -7,6 +7,7 @@ publish = false  # not on crates.io yet; guards against an accidental `cargo pub
 
 # No [dependencies] yet — every dependency is discussed before it is added.
 [dependencies]
+csv = "1.4.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 ureq = "3.4.0"

@@ -12,16 +12,13 @@
 //! Fetching (network) and conforming (pure) are separate functions so the
 //! conformance logic is tested offline against recorded responses.
 
-use std::time::Duration;
-
 use crate::Error;
 use crate::fact::{Annotation, Fact};
+use crate::http;
 use crate::time::{Date, Timestamp};
 
 pub const DATASET: &str = "acs/acs5";
 const BASE_URL: &str = "https://api.census.gov/data";
-/// Refuse response bodies over this size. One variable for all counties is ~250 KB.
-const BODY_LIMIT_BYTES: u64 = 64 << 20;
 
 /// Publication dates of ACS 5-year releases, by endpoint year. Hand-maintained
 /// from Census Bureau press releases (verified 2026-08-30); the API does not
@@ -89,7 +86,10 @@ impl Request {
             .iter()
             .find(|(year, _)| *year == self.vintage_year)
             .map(|(_, date)| *date)
-            .ok_or(Error::UnsupportedVintage(self.vintage_year))
+            .ok_or(Error::UnsupportedVintage {
+                dataset: DATASET,
+                year: self.vintage_year,
+            })
     }
 
     /// The request URL **without** the key — this is what goes into provenance.
@@ -126,17 +126,13 @@ pub struct Client {
 
 impl Client {
     pub fn new(key: String) -> Self {
-        let agent = ureq::Agent::config_builder()
-            // A keyless/bad-key request is answered with a 302 to an HTML page
-            // that returns 200. Following it would turn an error into a
-            // plausible-looking success — the exact failure mode ADR-0005 forbids.
-            .max_redirects(0)
-            // Keep 4xx/5xx as responses so the error message can include the body.
-            .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(60)))
-            .build()
-            .new_agent();
-        Client { agent, key }
+        // The shared agent follows no redirects: a keyless/bad-key request here is
+        // answered with a 302 to an HTML page that returns 200, and following it
+        // would turn an error into a plausible-looking success (ADR-0005).
+        Client {
+            agent: http::agent(),
+            key,
+        }
     }
 
     /// Fetch and conform: every county-equivalent's value for `req`.
@@ -167,7 +163,7 @@ impl Client {
         let body = resp
             .body_mut()
             .with_config()
-            .limit(BODY_LIMIT_BYTES)
+            .limit(http::BODY_LIMIT_BYTES)
             .read_to_string()
             .map_err(|source| Error::Http {
                 url: url.to_owned(),
@@ -261,6 +257,7 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
             retrieved_at,
         });
     }
+    crate::fact::ensure_unique_keys(&facts)?;
     Ok(facts)
 }
 
@@ -296,7 +293,7 @@ fn parse_measure(
         // the silent failure ADR-0005 forbids. They are not numbers to us.
         Ok(v) if !v.is_finite() => Err(Error::BadNumber {
             text: text.to_owned(),
-            field: field_name,
+            field: field_name.to_owned(),
             geoid: geoid.to_owned(),
             variable: req.variable.clone(),
         }),
@@ -311,7 +308,7 @@ fn parse_measure(
         Ok(v) => Ok((Some(v), None)),
         Err(_) => Err(Error::BadNumber {
             text: text.to_owned(),
-            field: field_name,
+            field: field_name.to_owned(),
             geoid: geoid.to_owned(),
             variable: req.variable.clone(),
         }),
@@ -508,12 +505,20 @@ mod tests {
             "{no_column}"
         );
 
+        let dup = conform(
+            r#"[["NAME","B01003_001E","B01003_001M","state","county"],["X","1","2","06","037"],["X","1","2","06","037"]]"#,
+            &req(2023),
+            T0,
+        )
+        .unwrap_err();
+        assert!(matches!(dup, Error::DuplicateFactKey { .. }), "{dup}");
+
         let html = conform("<html>Missing Key</html>", &req(2023), T0).unwrap_err();
         assert!(matches!(html, Error::NotJson { .. }), "{html}");
 
         assert!(matches!(
             conform(CT_2023, &req(2019), T0).unwrap_err(),
-            Error::UnsupportedVintage(2019)
+            Error::UnsupportedVintage { year: 2019, .. }
         ));
         assert!(matches!(
             Request::new(2023, "B01003_001E").unwrap_err(),

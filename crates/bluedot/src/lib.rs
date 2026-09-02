@@ -6,6 +6,8 @@
 //!
 //! Module map (one job each):
 //! - [`acs`]    — Census ACS API client + conformance into the fact schema
+//! - [`pep`]    — Census PEP vintage CSV files (true revisions) + conformance
+//! - [`http`]   — the shared "don't be helpful" HTTP agent
 //! - [`fact`]   — the fact schema v0 (`Fact`, `Annotation`)
 //! - [`time`]   — tiny `Date`/`Timestamp` types (no date crate: a few lines of integer math)
 //! - [`jsonl`]  — atomic JSON Lines writer
@@ -19,7 +21,9 @@ pub mod acs;
 pub mod config;
 pub mod error;
 pub mod fact;
+pub mod http;
 pub mod jsonl;
+pub mod pep;
 pub mod time;
 
 // Re-export so callers write `bluedot::Error` instead of `bluedot::error::Error`.

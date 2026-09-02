@@ -27,6 +27,9 @@ echo 'CENSUS_API_KEY=your-key' > .env          # .env is gitignored
 cargo run -p bluedot -- ingest acs --indicator B01003_001 --vintage 2021 --vintage 2023
 #   → data/facts/acs5-2021.jsonl, data/facts/acs5-2023.jsonl (fact schema v0, one JSON object per line)
 
+cargo run -p bluedot -- ingest pep --vintage 2022 --vintage 2023 --vintage 2024 --vintage 2025
+#   → data/facts/pep-<year>.jsonl — Population Estimates vintages (true revisions); public files, no key
+
 uv run --project atlas bluedot-atlas build-facts
 #   → data/facts.parquet, then prints the demo queries (vintage axis, Connecticut boundary change, annotations)
 

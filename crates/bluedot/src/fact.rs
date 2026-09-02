@@ -3,8 +3,11 @@
 //! One `Fact` is one observed value of one indicator for one entity over one
 //! valid-time interval, as published in one vintage, with its provenance.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
+use crate::Error;
 use crate::time::{Date, Timestamp};
 
 /// Field order here is the column order in the JSON Lines output.
@@ -45,6 +48,35 @@ pub struct Fact {
     /// The request that produced this row, with the API key removed.
     pub source_url: String,
     pub retrieved_at: Timestamp,
+}
+
+/// Refuse a batch whose fact key (ADR-0001) is not unique — a source that
+/// repeats a row is a source we don't understand. Both conform() paths call
+/// this before returning, so `ingest` succeeding IS the uniqueness guarantee
+/// (the Python build step re-checks across files).
+///
+/// `HashSet::insert` returns false when the value was already present — the
+/// whole check is one pass, borrowing `&str`s rather than cloning keys.
+pub fn ensure_unique_keys(facts: &[Fact]) -> Result<(), Error> {
+    let mut seen = HashSet::with_capacity(facts.len());
+    for f in facts {
+        let key = (
+            f.entity_id.as_str(),
+            f.indicator_id.as_str(),
+            f.valid_from,
+            f.valid_to,
+            f.vintage.as_str(),
+        );
+        if !seen.insert(key) {
+            return Err(Error::DuplicateFactKey {
+                entity_id: f.entity_id.clone(),
+                indicator_id: f.indicator_id.clone(),
+                valid_from: f.valid_from,
+                vintage: f.vintage.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Why a value is absent. Names follow the Census Bureau's "Notes on ACS Estimate
