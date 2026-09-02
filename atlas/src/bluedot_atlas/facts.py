@@ -245,14 +245,14 @@ def build_facts(data_dir: Path) -> Path:
         print("\n(h) Data centers by lifecycle stage — ECHO air permits, latest snapshot")
         con.sql("""
             SELECT value_text AS stage, count(DISTINCT entity_id) AS facilities
-            FROM claims WHERE attribute_id = 'dc:stage'
-              AND vintage = (SELECT max(vintage) FROM claims)
+            FROM claims WHERE attribute_id = 'dc:stage' AND source_dataset = 'epa/echo/air'
+              AND vintage = (SELECT max(vintage) FROM claims WHERE source_dataset = 'epa/echo/air')
             GROUP BY 1 ORDER BY 2 DESC
         """).show()
         print("(i) Top states by air-permitted data centers, with pipeline split")
         print("    (a facility whose records carry several stages counts in each — deliberately)")
         con.sql("""
-            WITH latest AS (SELECT max(vintage) AS v FROM claims),
+            WITH latest AS (SELECT max(vintage) AS v FROM claims WHERE source_dataset = 'epa/echo/air'),
             st AS (SELECT DISTINCT entity_id, value_text AS state FROM claims, latest
                    WHERE attribute_id = 'dc:state' AND vintage = latest.v),
             sg AS (SELECT DISTINCT entity_id, value_text AS stage FROM claims, latest
@@ -263,5 +263,16 @@ def build_facts(data_dir: Path) -> Path:
                    count(DISTINCT sg.entity_id) FILTER (sg.stage IN ('planned_facility','under_construction')) AS pipeline
             FROM st JOIN sg USING (entity_id)
             GROUP BY 1 ORDER BY facilities DESC LIMIT 8
+        """).show()
+        print("(j) Prince William County buildings by stage, with floor area")
+        con.sql("""
+            WITH latest AS (SELECT max(vintage) AS v FROM claims WHERE source_dataset = 'pwcva/build-out-analysis'),
+            sg AS (SELECT DISTINCT entity_id, value_text AS stage FROM claims, latest
+                   WHERE attribute_id = 'dc:stage' AND vintage = latest.v AND entity_id LIKE 'pwc/bld/%'),
+            g AS (SELECT entity_id, max(value_num) AS gfa FROM claims, latest
+                  WHERE attribute_id = 'dc:gfa_sqft' AND vintage = latest.v GROUP BY 1)
+            SELECT sg.stage, count(*) AS buildings, round(sum(g.gfa) / 1e6, 2) AS gfa_msqft
+            FROM sg LEFT JOIN g USING (entity_id)
+            GROUP BY 1 ORDER BY buildings DESC
         """).show()
     return out
