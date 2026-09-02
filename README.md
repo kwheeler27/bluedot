@@ -43,4 +43,8 @@ uv run --project atlas bluedot-atlas page geoId/06037 pep:POPESTIMATE 2022-07-01
 cargo test && cargo clippy --all-targets -- -D warnings   # offline; fixtures under crates/bluedot/tests/fixtures
 ```
 
+## Snapshots
+
+`snapshots/` is the committed archive of dated source pulls (entities + claims JSON Lines) for the [Data Center Atlas](docs/atlas/data-centers/PLAN.md). A GitHub Actions workflow ([snapshot.yml](.github/workflows/snapshot.yml)) re-pulls EPA ECHO and the Prince William County layers on the 1st of each month and opens a PR with the new vintages — merging it is the archival act. To fold archived snapshots into your local store: `cp -n snapshots/entities/* data/entities/ && cp -n snapshots/claims/* data/claims/`, then re-run `build-facts` (`-n` skips files you already have; if a same-vintage file slips in twice, the duplicate-key check refuses loudly — that's the guard working).
+
 Run everything from the repo root: the engine writes to `./data/` and the Python steps read from it. `uv` downloads and manages Python 3.13 itself; if you use pyenv, note that `atlas/.python-version` makes a bare `python3` inside `atlas/` complain — use `uv run`.
