@@ -57,6 +57,14 @@ pub enum Error {
         geoid: String,
         variable: String,
     },
+    /// The same claim key appeared twice in one conformed batch (ADR-0015 key).
+    DuplicateClaimKey {
+        entity_id: String,
+        attribute_id: String,
+        valid_from: Date,
+        vintage: String,
+        source_record: String,
+    },
     /// The same fact key appeared twice in one conformed batch — the source
     /// repeated a row. The engine's own success must guarantee ADR-0001's key,
     /// not a later, skippable build step.
@@ -144,6 +152,17 @@ impl fmt::Display for Error {
                 )
             }
             Error::Csv { url, .. } => write!(f, "malformed CSV from {url}"),
+            Error::DuplicateClaimKey {
+                entity_id,
+                attribute_id,
+                valid_from,
+                vintage,
+                source_record,
+            } => write!(
+                f,
+                "duplicate claim key: {entity_id} {attribute_id} valid_from {valid_from} \
+                 vintage {vintage} record {source_record} — refusing the whole batch"
+            ),
             Error::DuplicateFactKey {
                 entity_id,
                 indicator_id,

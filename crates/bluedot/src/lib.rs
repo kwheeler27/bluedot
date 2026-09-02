@@ -6,6 +6,8 @@
 //!
 //! Module map (one job each):
 //! - [`acs`]    — Census ACS API client + conformance into the fact schema
+//! - [`echo`]   — EPA ECHO air-permit facilities (Data Center Atlas, DC-0)
+//! - [`claim`]  — the claim record: someone asserts something about an entity
 //! - [`pep`]    — Census PEP vintage CSV files (true revisions) + conformance
 //! - [`http`]   — the shared "don't be helpful" HTTP agent
 //! - [`fact`]   — the fact schema v0 (`Fact`, `Annotation`)
@@ -18,7 +20,9 @@
 //! here the crate. `///` is an "outer" doc comment — it documents the next item.)
 
 pub mod acs;
+pub mod claim;
 pub mod config;
+pub mod echo;
 pub mod error;
 pub mod fact;
 pub mod http;

@@ -228,6 +228,8 @@ pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Con
             boundary_year: req.vintage_year,
             vintage: vintage.clone(),
             source_dataset: source_dataset.clone(),
+            lat: None,
+            lon: None,
         });
         let count = |col: usize, name: &str| parse_count(cell(col), name, &entity_id, req);
 

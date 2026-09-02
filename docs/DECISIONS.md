@@ -209,3 +209,19 @@ Each entry: **Context** (the forces) · **Decision** · **Consequences** (what g
 **Consequences.** Names ship today, and every naming variant is preserved as data for the real registry to canonicalize later, instead of being lost at ingest. Costs: the same place carries several name rows, and any consumer wanting "the" name must choose — which is honest, because today there is no "the" name.
 
 **Revisit when.** Cross-source identity, parent hierarchies, or boundary lineage are needed — that is the real versioned registry (YAML/tables, ADR-0009), and this table becomes one of its inputs.
+
+---
+
+## ADR-0015 — The claim: a second record kind for asserted attributes
+
+**Date:** 2026-09-02 · **Status:** Accepted
+
+**Context.** Fact schema v0 carries numeric observations of declared statistical indicators. The Data Center Atlas (approved plan, `docs/atlas/data-centers/PLAN.md`) needs to store what *someone asserts* about an entity — a lifecycle stage from a permit record, a capacity figure from a press release, a role from a docket — where the asserter, the backing record, and the credibility tier are part of the datum, and where competing assertions must coexist rather than be reconciled at ingest.
+
+**Decision.** A `Claim` is keyed on `(entity_id, attribute_id, [valid_from, valid_to), vintage, source_record)` — the bitemporal spine of ADR-0001 plus the specific source record (permit id, docket number, filing) that asserts it. It carries exactly one of `value_text`/`value_num` (+ optional unit), `stated_by` (as stated, never resolved), a three-tier `confidence` (`confirmed_by_record` / `reported` / `rumored`), and full ADR-0010 provenance. Claims are never merged, averaged, or deduplicated across sources at ingest; uniqueness of the full key is enforced in-engine, like facts. Sources that only reveal "what the record says today" produce snapshot-dated vintages (`echo-2026-09-02`) with one-day valid intervals — repeated snapshots accumulate into a knowledge-time history.
+
+**Consequences.** Competing capacity claims render side by side with their sources (the design deck's dossier view); the pipeline "what changed" board is a query between two vintages; a facility with several permit records keeps all of them. Costs: consumers must choose which claims to trust for any rollup (that is the point), and attribute vocabularies live with adapters until the semantic layer (ADR-0004) takes them over.
+
+**Alternatives rejected.** Widening `Fact` with nullable text/asserter columns — muddies a clean numeric-observation schema and its key. A reconciled "current value" table — exactly the silent laundering ADR-0005 forbids.
+
+**Revisit when.** The semantic layer takes ownership of attribute vocabularies, or roles (org↔facility) need more structure than entity-valued claims.

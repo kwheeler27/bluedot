@@ -116,6 +116,10 @@ pub struct Entity {
     pub boundary_year: u16,
     pub vintage: String,
     pub source_dataset: String,
+    /// Point coordinates where the source provides them (facilities);
+    /// `None` for administrative areas until geometry arrives (ADR-0003).
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
 }
 
 /// Geographic level. An enum rather than a string so a typo'd level is a
@@ -125,6 +129,8 @@ pub struct Entity {
 pub enum Level {
     State,
     County,
+    /// A physical site (e.g. a data center), not an administrative area.
+    Facility,
 }
 
 /// What one conform pass produces: the facts, and the entities they mention.

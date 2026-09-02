@@ -46,6 +46,31 @@ impl Date {
     }
 }
 
+impl Date {
+    /// The following calendar day — for the one-day half-open interval of a
+    /// point-in-time observation (ADR-0013). Month/year rollover handled;
+    /// leap years by the divisibility rule.
+    pub fn next_day(self) -> Date {
+        let leap = self.year % 4 == 0 && (self.year % 100 != 0 || self.year % 400 == 0);
+        let dim = match self.month {
+            2 => {
+                if leap {
+                    29
+                } else {
+                    28
+                }
+            }
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        match (self.day < dim, self.month < 12) {
+            (true, _) => Date::new(self.year, self.month, self.day + 1),
+            (false, true) => Date::new(self.year, self.month + 1, 1),
+            (false, false) => Date::new(self.year + 1, 1, 1),
+        }
+    }
+}
+
 impl fmt::Display for Date {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
@@ -121,6 +146,17 @@ mod tests {
     #[test]
     fn day_before_epoch() {
         assert_eq!(Date::from_unix_days(-1), Date::new(1969, 12, 31));
+    }
+
+    #[test]
+    fn next_day_rolls_months_years_and_leap_days() {
+        assert_eq!(Date::new(2026, 9, 2).next_day(), Date::new(2026, 9, 3));
+        assert_eq!(Date::new(2026, 9, 30).next_day(), Date::new(2026, 10, 1));
+        assert_eq!(Date::new(2026, 12, 31).next_day(), Date::new(2027, 1, 1));
+        assert_eq!(Date::new(2024, 2, 28).next_day(), Date::new(2024, 2, 29));
+        assert_eq!(Date::new(2023, 2, 28).next_day(), Date::new(2023, 3, 1));
+        assert_eq!(Date::new(2000, 2, 28).next_day(), Date::new(2000, 2, 29));
+        assert_eq!(Date::new(1900, 2, 28).next_day(), Date::new(1900, 3, 1));
     }
 
     #[test]
