@@ -34,3 +34,7 @@ Full design context: @docs/BLUEDOT_BRIEF.md
 - Prefer small vertical slices over broad scaffolding. Current focus: Stage 0
   (see brief) — ACS county demographics end to end.
 - Ask before adding dependencies or new services.
+- **Build and iterate.** Plans are provisional by design: ship the thin slice,
+  learn from real data and real use, and let what surfaces revise the briefs,
+  ADRs, mockups, and this file. Prefer reversible decisions; when we change our
+  mind, record it (DECISIONS.md supersedes, never rewrites history).
