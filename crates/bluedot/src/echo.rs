@@ -414,6 +414,19 @@ mod tests {
             "{echo_err}"
         );
 
+        let empty = conform(r#"{"Results":{"Facilities":[]}}"#, &req(), T0).unwrap_err();
+        assert!(
+            matches!(&empty, Error::BadResponseShape { detail, .. } if detail.contains("zero")),
+            "{empty}"
+        );
+
+        // a literally repeated record must refuse the batch with the claim-key error
+        let mut v: serde_json::Value = serde_json::from_str(SUBSET).unwrap();
+        let rows = v["Results"]["Facilities"].as_array_mut().unwrap();
+        let first = rows[0].clone();
+        rows.push(first);
+        let dup = conform(&v.to_string(), &req(), T0).unwrap_err();
+        assert!(matches!(dup, Error::DuplicateClaimKey { .. }), "{dup}");
         assert!(matches!(
             Request::new("51x", Date::new(2026, 9, 2)).unwrap_err(),
             Error::Usage(_)

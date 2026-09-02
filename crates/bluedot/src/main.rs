@@ -22,8 +22,9 @@ const USAGE: &str = "usage:
   bluedot ingest pep --vintage <YEAR> [--vintage <YEAR>...] [--out <DIR>]
   bluedot ingest echo [--naics <CODE>] [--out <DIR>]         # snapshot-dated; default NAICS 518210
 
-Writes <DIR>/facts/<vintage>.jsonl and <DIR>/entities/<vintage>.jsonl (default
-DIR: data). All vintages are fetched and conformed before any file is written.
+acs/pep write <DIR>/facts/<vintage>.jsonl + <DIR>/entities/<vintage>.jsonl;
+echo writes <DIR>/entities/<vintage>.jsonl + <DIR>/claims/<vintage>.jsonl
+(default DIR: data). Everything is fetched and conformed before any write.
 `acs` needs CENSUS_API_KEY in the environment or ./.env; `pep` reads public
 files and needs no key.";
 
