@@ -20,4 +20,4 @@ Two sources now describe many of the same buildings from different records — t
 3. Query (k) renders a real two-source dossier.
 
 ## Known limits (v0, stated)
-FRS geocodes can be street-address centroids (a campus's buildings may all sit near one point — the ambiguity refusal handles this by *not guessing*); name tokens can't distinguish same-operator neighbors (distance rule bears that load); links are snapshot-dated and regenerated, not curated.
+FRS geocodes can be street-address centroids, and one FRS facility often stands for a whole campus — so several county buildings may link to one FRS id (many-to-one is legitimate campus semantics; the run summary counts it and each such claim's evidence names it). The per-building ambiguity refusal covers the one-building-many-facilities direction only; name tokens can't distinguish same-operator neighbors (distance rule bears that load); links are snapshot-dated and regenerated, not curated.

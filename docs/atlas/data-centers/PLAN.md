@@ -28,7 +28,7 @@ Fact schema v0 carries numeric observations of declared indicators. Facilities n
  valid_from, valid_to,          -- when the claimed thing is/was true
  stated_by,                     -- the org or document that asserts it
  published_at, source_url, source_dataset, retrieved_at,
- confidence)                    -- confirmed-by-record | reported | rumored
+ confidence)                    -- confirmed-by-record | reported | rumored | inferred (ADR-0016)
 ```
 
 Same bitemporal spine as ADR-0001 (valid time × knowledge time), same provenance discipline as ADR-0010, extended with *who said it* and *how sure we are*. Lifecycle stages are claims on `dc:stage`; roles (owner / operator / tenant / utility) are claims whose value is another entity — the exact representation is an implementation-brief decision (candidate ADR-0015), not resolved here. Facilities, campuses, and organizations become registry entities (new levels alongside state/county — ADR-0014's registry grows exactly as designed). This stays tables-not-triples (ADR-0009).

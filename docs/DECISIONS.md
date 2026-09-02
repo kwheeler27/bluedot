@@ -225,3 +225,17 @@ Each entry: **Context** (the forces) · **Decision** · **Consequences** (what g
 **Alternatives rejected.** Widening `Fact` with nullable text/asserter columns — muddies a clean numeric-observation schema and its key. A reconciled "current value" table — exactly the silent laundering ADR-0005 forbids.
 
 **Revisit when.** The semantic layer takes ownership of attribute vocabularies, or roles (org↔facility) need more structure than entity-valued claims.
+
+---
+
+## ADR-0016 — Confidence gains a fourth tier: `inferred` (amends ADR-0015)
+
+**Date:** 2026-09-02 · **Status:** Accepted
+
+**Context.** ADR-0015 defined three confidence tiers, all describing how a *source's* statement is backed. Cross-source entity resolution (brief 06) produces a different kind of claim: Blue Dot's own inference that two records describe one physical site. Filing that under any of the three source-statement tiers would misattribute it.
+
+**Decision.** `Confidence` gains `inferred`: a conclusion drawn by Blue Dot's own code, never a source's statement. An inferred claim must carry its method and evidence in `stated_by` (e.g. distance and shared name tokens for linkage), so it is auditable and distinguishable from source assertions everywhere it renders. Consumers may exclude `inferred` claims wholesale — that is the point of the tier.
+
+**Consequences.** Interpretations stay attributed (a hard rule of the constitution) while living in the same claims store as everything else. The cost: `stated_by` is doing double duty as an evidence field.
+
+**Revisit when.** Inference evidence needs structure (its own column or table) — likely when a second inference kind arrives.

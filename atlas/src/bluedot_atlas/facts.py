@@ -280,7 +280,7 @@ def build_facts(data_dir: Path) -> Path:
             WITH link AS (
                 SELECT entity_id AS pwc_id, value_text AS frs_id
                 FROM claims WHERE attribute_id = 'dc:same_as'
-                ORDER BY entity_id LIMIT 1
+                ORDER BY entity_id, vintage DESC LIMIT 1
             )
             SELECT c.entity_id, c.attribute_id,
                    coalesce(c.value_text, c.value_num::VARCHAR) AS value,

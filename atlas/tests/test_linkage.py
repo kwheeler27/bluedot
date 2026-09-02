@@ -43,3 +43,30 @@ class Decision(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MatchAll(unittest.TestCase):
+    def test_one_building_near_two_facilities_refuses(self):
+        from bluedot_atlas.linkage import match_all
+
+        pwc = [("pwc/bld/a", "Iron Mountain VA-1", 38.0, -77.0)]
+        frs = [
+            ("frs/1", "IRON MOUNTAIN ALPHA", 38.0, -77.0),
+            ("frs/2", "IRON MOUNTAIN BETA", 38.0005, -77.0),  # ~55 m away
+        ]
+        links, ambiguous = match_all(pwc, frs)
+        self.assertEqual(links, [])
+        self.assertEqual(ambiguous, [("pwc/bld/a", ["frs/1", "frs/2"])])
+
+    def test_two_buildings_near_one_facility_links_both_visibly(self):
+        from bluedot_atlas.linkage import match_all
+
+        pwc = [
+            ("pwc/bld/a", "Iron Mountain VA-1", 38.0, -77.0),
+            ("pwc/bld/b", "Iron Mountain VA-2", 38.0008, -77.0),  # ~89 m away
+        ]
+        frs = [("frs/1", "IRON MOUNTAIN INFORMATION", 38.0004, -77.0)]
+        links, ambiguous = match_all(pwc, frs)
+        self.assertEqual(ambiguous, [])
+        self.assertEqual(len(links), 2)
+        self.assertEqual({fid for _, fid, _, _ in links}, {"frs/1"})
