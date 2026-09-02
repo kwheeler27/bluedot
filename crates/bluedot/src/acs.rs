@@ -13,7 +13,7 @@
 //! conformance logic is tested offline against recorded responses.
 
 use crate::Error;
-use crate::fact::{Annotation, Fact};
+use crate::fact::{Annotation, Conformed, Entity, Fact, Level};
 use crate::http;
 use crate::time::{Date, Timestamp};
 
@@ -136,7 +136,7 @@ impl Client {
     }
 
     /// Fetch and conform: every county-equivalent's value for `req`.
-    pub fn county_facts(&self, req: &Request) -> Result<Vec<Fact>, Error> {
+    pub fn county_data(&self, req: &Request) -> Result<Conformed, Error> {
         let retrieved_at = Timestamp::now();
         let body = self.fetch(&req.url())?;
         conform(&body, req, retrieved_at)
@@ -184,7 +184,7 @@ impl Client {
 }
 
 /// Turn an API response body into facts. Pure: no network, no clock.
-pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec<Fact>, Error> {
+pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Conformed, Error> {
     let url = req.url();
     // Every cell is a JSON string or null — hence `Option<String>`.
     let rows: Vec<Vec<Option<String>>> =
@@ -212,11 +212,13 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
         column(&format!("{}M", req.variable))?,
     );
     let (state_col, county_col) = (column("state")?, column("county")?);
+    let name_col = column("NAME")?;
 
     let published_at = req.published_at()?;
     let (valid_from, valid_to) = req.valid_interval();
 
     let mut facts = Vec::with_capacity(data.len());
+    let mut entities = Vec::with_capacity(data.len());
     for (i, row) in data.iter().enumerate() {
         if row.len() != header.len() {
             return Err(shape_err(format!(
@@ -234,13 +236,25 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
             )));
         };
         let geoid = format!("{state}{county}");
+        let entity_id = format!("geoId/{geoid}");
+        let Some(name) = cell(name_col).filter(|n| !n.is_empty()) else {
+            return Err(shape_err(format!("row {} has no NAME", i + 1)));
+        };
 
         let (value, value_annotation) =
             parse_measure(cell(estimate_col), Field::Estimate, "estimate", &geoid, req)?;
         let (moe, moe_annotation) = parse_measure(cell(moe_col), Field::Moe, "moe", &geoid, req)?;
 
+        entities.push(Entity {
+            entity_id: entity_id.clone(),
+            name: name.to_owned(),
+            level: Level::County, // this request shape is for=county:* — counties only
+            boundary_year: req.vintage_year,
+            vintage: req.vintage(),
+            source_dataset: DATASET.to_owned(),
+        });
         facts.push(Fact {
-            entity_id: format!("geoId/{geoid}"),
+            entity_id,
             indicator_id: req.indicator_id(),
             valid_from,
             valid_to,
@@ -258,7 +272,7 @@ pub fn conform(body: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
         });
     }
     crate::fact::ensure_unique_keys(&facts)?;
-    Ok(facts)
+    Ok(Conformed { facts, entities })
 }
 
 /// One cell → either a number or an annotation, never both, never neither.
@@ -338,7 +352,7 @@ mod tests {
 
     #[test]
     fn vintage_2021_has_eight_connecticut_counties() {
-        let facts = conform(CT_2021, &req(2021), T0).unwrap();
+        let facts = conform(CT_2021, &req(2021), T0).unwrap().facts;
         let ids: Vec<&str> = facts.iter().map(|f| f.entity_id.as_str()).collect();
         assert_eq!(
             ids,
@@ -374,18 +388,28 @@ mod tests {
                 .ends_with("/2021/acs/acs5?get=NAME,B01003_001E,B01003_001M&for=county:*")
         );
         assert!(!fairfield.source_url.contains("key="));
+
+        let entities = conform(CT_2021, &req(2021), T0).unwrap().entities;
+        assert_eq!(entities.len(), 8);
+        assert_eq!(entities[0].name, "Fairfield County, Connecticut");
+        assert_eq!(entities[0].level, Level::County);
+        assert!(
+            serde_json::to_string(&entities[0])
+                .unwrap()
+                .contains(r#""level":"county""#)
+        );
     }
 
     #[test]
     fn vintage_2023_has_nine_planning_regions_and_no_legacy_counties() {
-        let facts = conform(CT_2023, &req(2023), T0).unwrap();
+        let facts = conform(CT_2023, &req(2023), T0).unwrap().facts;
         assert_eq!(facts.len(), 9);
         assert!(
             facts
                 .iter()
                 .all(|f| f.entity_id.as_str() >= "geoId/09110" && f.boundary_year == 2023)
         );
-        let legacy = conform(CT_2021, &req(2021), T0).unwrap();
+        let legacy = conform(CT_2021, &req(2021), T0).unwrap().facts;
         assert!(
             legacy
                 .iter()
@@ -395,7 +419,7 @@ mod tests {
 
     #[test]
     fn serializes_to_the_documented_column_vocabulary() {
-        let facts = conform(CT_2023, &req(2023), T0).unwrap();
+        let facts = conform(CT_2023, &req(2023), T0).unwrap().facts;
         let json = serde_json::to_string(&facts[0]).unwrap();
         assert!(json.starts_with(r#"{"entity_id":"geoId/09110","indicator_id":"acs:B01003_001","valid_from":"2019-01-01","valid_to":"2024-01-01","vintage":"acs5-2023","published_at":"2024-12-12","value":969029.0,"moe":null,"value_annotation":null,"moe_annotation":"controlled","boundary_year":2023,"#), "{json}");
     }
@@ -441,7 +465,7 @@ mod tests {
             ),
         ];
         for (e, m, want_e, want_m) in cases {
-            let f = &conform(&body(e, m), &req(2023), T0).unwrap()[0];
+            let f = &conform(&body(e, m), &req(2023), T0).unwrap().facts[0];
             assert_eq!(
                 (f.value_annotation, f.moe_annotation),
                 (want_e, want_m),

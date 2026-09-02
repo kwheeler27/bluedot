@@ -195,3 +195,17 @@ Each entry: **Context** (the forces) · **Decision** · **Consequences** (what g
 **Alternatives rejected.** A single `valid_time` plus a period-length column — two columns anyway, worse ergonomics. Closed intervals — off-by-one bugs at every boundary. A string label like `2019-2023` — not comparable.
 
 **Revisit when.** Never on the principle; storage types (DATE vs TIMESTAMP) may change with sources at sub-day resolution.
+
+---
+
+## ADR-0014 — Entity registry v0: per-source, per-vintage names, no canonical form
+
+**Date:** 2026-09-02 · **Status:** Accepted
+
+**Context.** Pages need display names. The sources already state them — and disagree: ACS says "Los Angeles County, California", PEP says "Los Angeles County"; the same New Mexico county is "Doña Ana" in every current vintage but encodings differ by file. ADR-0009 plans a versioned entity registry as one of the two graph-shaped layers; nothing of it existed, and the engine was discarding the names it parsed.
+
+**Decision.** The engine emits an `Entity` row per source row — `entity_id`, `name` exactly as the source stated it, `level` (state | county), `boundary_year`, `vintage`, `source_dataset` — into `data/entities/<vintage>.jsonl` beside the facts. No deduplication and no canonical form: the registry v0 is an *observation log of what sources call places*, keyed like the facts are. Display code picks a name (latest vintage, any source) and says nothing more; a missing name degrades to the raw id with a "registry pending" chip, never an error — names are decoration, numbers are the product.
+
+**Consequences.** Names ship today, and every naming variant is preserved as data for the real registry to canonicalize later, instead of being lost at ingest. Costs: the same place carries several name rows, and any consumer wanting "the" name must choose — which is honest, because today there is no "the" name.
+
+**Revisit when.** Cross-source identity, parent hierarchies, or boundary lineage are needed — that is the real versioned registry (YAML/tables, ADR-0009), and this table becomes one of its inputs.

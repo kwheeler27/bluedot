@@ -15,7 +15,7 @@
 //! Fetching (network) and conforming (pure) are separate, as in [`crate::acs`].
 
 use crate::Error;
-use crate::fact::{Annotation, Fact};
+use crate::fact::{Annotation, Conformed, Entity, Fact, Level};
 use crate::http;
 use crate::time::{Date, Timestamp};
 
@@ -77,7 +77,7 @@ impl Client {
     }
 
     /// Fetch and conform one vintage. No API key involved: these are public files.
-    pub fn county_facts(&self, req: &Request) -> Result<Vec<Fact>, Error> {
+    pub fn county_data(&self, req: &Request) -> Result<Conformed, Error> {
         let retrieved_at = Timestamp::now();
         let url = req.url();
         let mut resp = self.agent.get(&url).call().map_err(|source| Error::Http {
@@ -132,7 +132,7 @@ pub fn decode(bytes: Vec<u8>) -> String {
 }
 
 /// Turn a decoded vintage file into facts. Pure: no network, no clock.
-pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec<Fact>, Error> {
+pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Conformed, Error> {
     let url = req.url();
     let csv_err = |source: csv::Error| Error::Csv {
         url: url.clone(),
@@ -154,6 +154,7 @@ pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
     let (sumlev_col, state_col, county_col) =
         (column("SUMLEV")?, column("STATE")?, column("COUNTY")?);
     let base_col = column("ESTIMATESBASE2020")?;
+    let (stname_col, ctyname_col) = (column("STNAME")?, column("CTYNAME")?);
 
     // Estimate columns discovered from the header, so a new vintage needs only a
     // RELEASES entry — but the discovered set must be exactly 2020..=vintage
@@ -195,12 +196,21 @@ pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
         };
 
     let mut facts = Vec::new();
+    let mut entities = Vec::new();
     for (i, record) in reader.records().enumerate() {
         let record = record.map_err(csv_err)?; // ragged rows are a csv error already
         let cell = |col: usize| record.get(col).unwrap_or_default();
-        let entity_id = match cell(sumlev_col) {
-            "040" => format!("geoId/{}", cell(state_col)),
-            "050" => format!("geoId/{}{}", cell(state_col), cell(county_col)),
+        let (entity_id, level, name) = match cell(sumlev_col) {
+            "040" => (
+                format!("geoId/{}", cell(state_col)),
+                Level::State,
+                cell(stname_col),
+            ),
+            "050" => (
+                format!("geoId/{}{}", cell(state_col), cell(county_col)),
+                Level::County,
+                cell(ctyname_col),
+            ),
             other => {
                 return Err(shape_err(format!(
                     "row {}: unexpected SUMLEV {other:?}",
@@ -208,6 +218,17 @@ pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
                 )));
             }
         };
+        if name.is_empty() {
+            return Err(shape_err(format!("row {}: empty entity name", i + 2)));
+        }
+        entities.push(Entity {
+            entity_id: entity_id.clone(),
+            name: name.to_owned(),
+            level,
+            boundary_year: req.vintage_year,
+            vintage: vintage.clone(),
+            source_dataset: source_dataset.clone(),
+        });
         let count = |col: usize, name: &str| parse_count(cell(col), name, &entity_id, req);
 
         // The estimates base is a point-in-time value for April 1, 2020 (census day)...
@@ -235,7 +256,7 @@ pub fn conform(text: &str, req: &Request, retrieved_at: Timestamp) -> Result<Vec
         }
     }
     crate::fact::ensure_unique_keys(&facts)?;
-    Ok(facts)
+    Ok(Conformed { facts, entities })
 }
 
 /// A population count: a non-negative integer, nothing else. PEP has no
@@ -267,8 +288,12 @@ mod tests {
         unix_seconds: 1_756_712_000,
     };
 
-    fn facts_for(bytes: &[u8], year: u16) -> Vec<Fact> {
+    fn conformed_for(bytes: &[u8], year: u16) -> Conformed {
         conform(&decode(bytes.to_vec()), &Request::new(year), T0).unwrap()
+    }
+
+    fn facts_for(bytes: &[u8], year: u16) -> Vec<Fact> {
+        conformed_for(bytes, year).facts
     }
 
     fn find<'a>(facts: &'a [Fact], entity: &str, indicator: &str, valid_from: Date) -> &'a Fact {
@@ -311,6 +336,16 @@ mod tests {
         // Connecticut is planning regions in every vintage of this file series
         assert!(facts.iter().any(|f| f.entity_id == "geoId/09110"));
         assert!(!facts.iter().any(|f| f.entity_id == "geoId/09001"));
+
+        let entities = conformed_for(V2022, 2022).entities;
+        assert_eq!(entities.len(), 12);
+        let ca = entities.iter().find(|e| e.entity_id == "geoId/06").unwrap();
+        assert_eq!((ca.name.as_str(), ca.level), ("California", Level::State));
+        let la = entities
+            .iter()
+            .find(|e| e.entity_id == "geoId/06037")
+            .unwrap();
+        assert_eq!(la.name, "Los Angeles County"); // PEP's name; ACS appends the state — registry v0 keeps both
     }
 
     #[test]
@@ -331,11 +366,16 @@ mod tests {
         // No runtime assert that V2025 is invalid UTF-8: rustc's `invalid_from_utf8`
         // lint already proves it statically (and flags the call as always-err).
         for (bytes, year) in [(V2022, 2022u16), (V2025, 2025)] {
+            let c = conformed_for(bytes, year);
             assert!(
-                facts_for(bytes, year)
+                c.facts.iter().any(|f| f.entity_id == "geoId/35013"),
+                "Doña Ana missing in v{year}"
+            );
+            assert!(
+                c.entities
                     .iter()
-                    .any(|f| f.entity_id == "geoId/35013"),
-                "Doña Ana County missing in v{year}"
+                    .any(|e| e.entity_id == "geoId/35013" && e.name == "Doña Ana County"),
+                "Doña Ana name wrong through the v{year} decode path"
             );
         }
         assert_eq!(decode(vec![0x44, 0x6f, 0xf1, 0x61]), "Doña"); // Latin-1 path
@@ -344,33 +384,56 @@ mod tests {
 
     #[test]
     fn refuses_what_it_does_not_understand() {
-        let hdr =
-            "SUMLEV,STATE,COUNTY,ESTIMATESBASE2020,POPESTIMATE2020,POPESTIMATE2021,POPESTIMATE2022";
+        let hdr = "SUMLEV,STATE,COUNTY,STNAME,CTYNAME,ESTIMATESBASE2020,POPESTIMATE2020,\
+                   POPESTIMATE2021,POPESTIMATE2022";
         let err = |csv: String, year| conform(&csv, &Request::new(year), T0).unwrap_err();
 
-        let sumlev = err(format!("{hdr}\n160,06,037,10,11,12,13\n"), 2022);
+        let sumlev = err(
+            format!("{hdr}\n160,06,037,California,Los Angeles County,10,11,12,13\n"),
+            2022,
+        );
         assert!(matches!(sumlev, Error::BadResponseShape { .. }), "{sumlev}");
 
-        let negative = err(format!("{hdr}\n050,06,037,10,11,-12,13\n"), 2022);
+        let unnamed = err(format!("{hdr}\n050,06,037,California,,10,11,12,13\n"), 2022);
+        assert!(
+            matches!(unnamed, Error::BadResponseShape { .. }),
+            "{unnamed}"
+        );
+
+        let negative = err(
+            format!("{hdr}\n050,06,037,California,Los Angeles County,10,11,-12,13\n"),
+            2022,
+        );
         assert!(matches!(negative, Error::BadNumber { .. }), "{negative}");
 
-        let word = err(format!("{hdr}\n050,06,037,10,11,twelve,13\n"), 2022);
+        let word = err(
+            format!("{hdr}\n050,06,037,California,Los Angeles County,10,11,twelve,13\n"),
+            2022,
+        );
         assert!(
             matches!(&word, Error::BadNumber { field, .. } if field == "POPESTIMATE2021"),
             "error should name the exact column: {word}"
         );
 
         let dup = err(
-            format!("{hdr}\n050,06,037,10,11,12,13\n050,06,037,10,11,12,13\n"),
+            format!(
+                "{hdr}\n050,06,037,California,Los Angeles County,10,11,12,13\n050,06,037,California,Los Angeles County,10,11,12,13\n"
+            ),
             2022,
         );
         assert!(matches!(dup, Error::DuplicateFactKey { .. }), "{dup}");
 
         // header stops at 2022 but the request says vintage 2023: wrong file
-        let years = err(format!("{hdr}\n050,06,037,10,11,12,13\n"), 2023);
+        let years = err(
+            format!("{hdr}\n050,06,037,California,Los Angeles County,10,11,12,13\n"),
+            2023,
+        );
         assert!(matches!(years, Error::BadResponseShape { .. }), "{years}");
 
-        let ragged = err(format!("{hdr}\n050,06,037,10\n"), 2022);
+        let ragged = err(
+            format!("{hdr}\n050,06,037,California,Los Angeles County,10\n"),
+            2022,
+        );
         assert!(matches!(ragged, Error::Csv { .. }), "{ragged}");
 
         let missing = err("A,B\n1,2\n".to_owned(), 2022);
