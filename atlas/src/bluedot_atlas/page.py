@@ -6,6 +6,7 @@ knowledge time). No server — the page is compiled, like everything in Blue Dot
 and opens from file://. Given the same Parquet, the output is byte-stable.
 """
 
+import html
 import json
 from datetime import date, timedelta
 from pathlib import Path
@@ -98,9 +99,21 @@ PAGE = Template("""<!doctype html>
     var prior = i ? ROWS[i - 1] : null;
     var restate = (prior && r.value !== null && prior.value !== null) ? sfmt(r.value - prior.value) : "—";
     var tr = document.createElement("tr");
-    tr.innerHTML = "<td>" + r.vintage + "</td><td>" + r.published_at + "</td><td class=num>" + fmt(r.value) +
-      "</td><td class=num>" + restate + "</td><td>" + (r.moe !== null ? fmt(r.moe) : (r.moe_annotation || "—")) +
-      "</td><td>" + r.boundary_year + "</td><td><a href=\\"" + r.source_url + "\\">" + r.source_dataset + " \\u2197</a></td>";
+    // DOM APIs, not innerHTML: payload strings are data, never markup.
+    var cells = [r.vintage, r.published_at, fmt(r.value), restate,
+                 r.moe !== null ? fmt(r.moe) : (r.moe_annotation || "—"), String(r.boundary_year)];
+    cells.forEach(function (text, k) {
+      var td = document.createElement("td");
+      if (k === 2 || k === 3) td.className = "num";
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    var srcTd = document.createElement("td");
+    var a = document.createElement("a");
+    if (r.source_url.indexOf("https://") === 0) { a.href = r.source_url; }
+    a.textContent = r.source_dataset + " ↗";
+    srcTd.appendChild(a);
+    tr.appendChild(srcTd);
     ladder.appendChild(tr); trs.push(tr);
   });
   function render(i) {
@@ -159,8 +172,12 @@ def compile_page(data_dir: Path, entity_id: str, indicator_id: str, valid_from_t
 
     name, registry_note = entity_id, ' · <span class="pending">registry pending</span>'
     if entities_pq.exists():
+        # "Newest" must be the integer boundary_year, not the vintage label —
+        # 'pep-2022' sorts after 'acs5-2026' as a string, which would silently
+        # pick a stale name the moment vintages interleave across sources.
         got = con.execute(
-            "SELECT name FROM read_parquet(?) WHERE entity_id = ? ORDER BY vintage DESC, source_dataset LIMIT 1",
+            "SELECT name FROM read_parquet(?) WHERE entity_id = ? "
+            "ORDER BY boundary_year DESC, source_dataset DESC LIMIT 1",
             [str(entities_pq), entity_id],
         ).fetchone()
         if got:
@@ -194,21 +211,26 @@ def compile_page(data_dir: Path, entity_id: str, indicator_id: str, valid_from_t
         }
         for r in rows
     ]
-    html = PAGE.substitute(
-        title=f"{name} — {meta['label']}, {valid_label}",
-        name=name,
-        entity_id=entity_id,
-        indicator_id=indicator_id,
-        valid_label=valid_label,
-        timeframe=meta["timeframe"],
-        definition=meta["definition"],
+    # Every substituted value is HTML-escaped: names come from live-fetched
+    # source data and ids from argv — data, never markup. registry_note is the
+    # one exception (our own trusted markup). The payload additionally escapes
+    # "<" so a value containing "</script>" can never terminate the tag.
+    esc = lambda v: html.escape(str(v), quote=True)  # noqa: E731
+    html_out = PAGE.substitute(
+        title=esc(f"{name} — {meta['label']}, {valid_label}"),
+        name=esc(name),
+        entity_id=esc(entity_id),
+        indicator_id=esc(indicator_id),
+        valid_label=esc(valid_label),
+        timeframe=esc(meta["timeframe"]),
+        definition=esc(meta["definition"]),
         registry_note=registry_note,
-        figcap=f"{meta['unit'] or 'value'} · valid {valid_label}",
-        retrieved=max(r[11] for r in rows).isoformat(),
-        payload=json.dumps(payload),
+        figcap=esc(f"{meta['unit'] or 'value'} · valid {valid_label}"),
+        retrieved=esc(max(r[11] for r in rows).isoformat()),
+        payload=json.dumps(payload).replace("<", "\\u003c"),
     )
     out = data_dir / "pages" / (f"{entity_id}.{indicator_id}.{valid_from}".replace("/", "-").replace(":", "-") + ".html")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html, encoding="utf-8")
+    out.write_text(html_out, encoding="utf-8")
     print(f"compiled {out} — {len(rows)} vintages, name {name!r}")
     return out
