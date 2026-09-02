@@ -30,6 +30,16 @@ FACT_COLUMNS: dict[str, str] = {
     "retrieved_at": "TIMESTAMP",
 }
 
+# Registry v0 (ADR-0014): per-source, per-vintage names; no canonical form yet.
+ENTITY_COLUMNS: dict[str, str] = {
+    "entity_id": "VARCHAR",
+    "name": "VARCHAR",
+    "level": "VARCHAR",
+    "boundary_year": "INTEGER",
+    "vintage": "VARCHAR",
+    "source_dataset": "VARCHAR",
+}
+
 # The fact key (ADR-0001, ADR-0013). valid_time is the half-open [valid_from, valid_to).
 FACT_KEY = ("entity_id", "indicator_id", "valid_from", "valid_to", "vintage")
 
@@ -160,6 +170,27 @@ def build_facts(data_dir: Path) -> Path:
 
     # COPY takes a literal path, not a bound parameter; escape single quotes.
     con.execute(f"COPY facts TO '{str(out).replace(chr(39), chr(39) * 2)}' (FORMAT PARQUET)")
+
+    ent_dir = data_dir / "entities"
+    efiles = sorted(ent_dir.glob("*.jsonl"))
+    if not efiles:
+        raise SystemExit(
+            f"no entity files in {ent_dir}/ — re-run the engine; it emits the registry v0 beside the facts"
+        )
+    ecols = ", ".join(f"'{n}': '{t}'" for n, t in ENTITY_COLUMNS.items())
+    con.execute(
+        f"CREATE TABLE entities AS SELECT * FROM read_json(?, format = 'newline_delimited', columns = {{{ecols}}})",
+        [[str(f) for f in efiles]],
+    )
+    (edups,) = con.execute(
+        "SELECT count(*) FROM (SELECT entity_id, vintage, source_dataset FROM entities GROUP BY ALL HAVING count(*) > 1)"
+    ).fetchone()
+    if edups:
+        raise SystemExit(f"{edups} duplicate registry keys — refusing to write entities.parquet")
+    eout = data_dir / "entities.parquet"
+    con.execute(f"COPY entities TO '{str(eout).replace(chr(39), chr(39) * 2)}' (FORMAT PARQUET)")
+    (n_entities,) = con.execute("SELECT count(*) FROM entities").fetchone()
+    print(f"wrote {eout} — {n_entities} registry rows from {len(efiles)} files")
 
     (n_rows,) = con.execute("SELECT count(*) FROM facts").fetchone()
     per_file = con.execute("SELECT vintage, count(*) FROM facts GROUP BY ALL ORDER BY vintage").fetchall()

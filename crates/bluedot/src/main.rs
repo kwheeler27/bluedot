@@ -1,8 +1,8 @@
 //! `bluedot` binary — a thin shell over the `bluedot` library.
 //!
 //! ```text
-//! bluedot ingest acs --indicator B01003_001 --vintage 2021 --vintage 2023 [--out data/facts]
-//! bluedot ingest pep --vintage 2022 --vintage 2023 --vintage 2024 --vintage 2025 [--out data/facts]
+//! bluedot ingest acs --indicator B01003_001 --vintage 2021 --vintage 2023 [--out data]
+//! bluedot ingest pep --vintage 2022 --vintage 2023 --vintage 2024 --vintage 2025 [--out data]
 //! ```
 //!
 //! Argument parsing is by hand: two subcommands still don't justify a CLI crate.
@@ -10,19 +10,20 @@
 //! chain) rather than the `Debug` dump of `fn main() -> Result`.
 
 use std::error::Error as _; // brings `.source()` into scope without naming the trait
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use bluedot::fact::Fact;
+use bluedot::fact::Conformed;
 use bluedot::{Error, acs, config, jsonl, pep};
 
 const USAGE: &str = "usage:
   bluedot ingest acs --indicator <TABLE_VAR> --vintage <YEAR> [--vintage <YEAR>...] [--out <DIR>]
   bluedot ingest pep --vintage <YEAR> [--vintage <YEAR>...] [--out <DIR>]
 
-Writes <DIR>/<vintage>.jsonl (default DIR: data/facts). All vintages are fetched
-and conformed before any file is written. `acs` needs CENSUS_API_KEY in the
-environment or ./.env; `pep` reads public files and needs no key.";
+Writes <DIR>/facts/<vintage>.jsonl and <DIR>/entities/<vintage>.jsonl (default
+DIR: data). All vintages are fetched and conformed before any file is written.
+`acs` needs CENSUS_API_KEY in the environment or ./.env; `pep` reads public
+files and needs no key.";
 
 enum Command {
     Usage,
@@ -48,8 +49,7 @@ fn parse_args(args: &[String]) -> Result<Command, Error> {
         _ => return Err(usage(&format!("unknown command {first:?} {second:?}"))),
     };
 
-    let (mut indicator, mut vintages, mut out_dir) =
-        (None, Vec::new(), PathBuf::from("data/facts"));
+    let (mut indicator, mut vintages, mut out_dir) = (None, Vec::new(), PathBuf::from("data"));
     let mut it = rest.iter();
     while let Some(flag) = it.next() {
         let value = it
@@ -89,11 +89,20 @@ fn parse_args(args: &[String]) -> Result<Command, Error> {
 
 /// Shared tail of both ingest paths: nothing reaches this function unless every
 /// vintage fetched and conformed, so a late failure can't masquerade as a
-/// complete run.
-fn write_outputs(outputs: &[(PathBuf, Vec<Fact>)]) -> Result<(), Error> {
-    for (path, facts) in outputs {
-        jsonl::write_atomic(path, facts)?;
-        println!("wrote {} ({} facts)", path.display(), facts.len());
+/// complete run. Each vintage writes its facts and its registry rows.
+fn write_outputs(out_dir: &Path, outputs: &[(String, Conformed)]) -> Result<(), Error> {
+    for (vintage, conformed) in outputs {
+        let facts_path = out_dir.join("facts").join(format!("{vintage}.jsonl"));
+        jsonl::write_atomic(&facts_path, &conformed.facts)?;
+        let entities_path = out_dir.join("entities").join(format!("{vintage}.jsonl"));
+        jsonl::write_atomic(&entities_path, &conformed.entities)?;
+        println!(
+            "wrote {} ({} facts) + {} ({} entities)",
+            facts_path.display(),
+            conformed.facts.len(),
+            entities_path.display(),
+            conformed.entities.len()
+        );
     }
     Ok(())
 }
@@ -117,16 +126,17 @@ fn run(key: Option<&str>) -> Result<(), Error> {
             for &year in &vintages {
                 let req = acs::Request::new(year, &indicator)?;
                 let started = Instant::now();
-                let facts = client.county_facts(&req)?;
+                let conformed = client.county_data(&req)?;
                 eprintln!(
-                    "{}: {} facts fetched in {:.1}s",
+                    "{}: {} facts, {} entities fetched in {:.1}s",
                     req.vintage(),
-                    facts.len(),
+                    conformed.facts.len(),
+                    conformed.entities.len(),
                     started.elapsed().as_secs_f64()
                 );
-                outputs.push((out_dir.join(format!("{}.jsonl", req.vintage())), facts));
+                outputs.push((req.vintage(), conformed));
             }
-            write_outputs(&outputs)
+            write_outputs(&out_dir, &outputs)
         }
         Command::IngestPep { vintages, out_dir } => {
             let client = pep::Client::new();
@@ -134,16 +144,17 @@ fn run(key: Option<&str>) -> Result<(), Error> {
             for &year in &vintages {
                 let req = pep::Request::new(year);
                 let started = Instant::now();
-                let facts = client.county_facts(&req)?;
+                let conformed = client.county_data(&req)?;
                 eprintln!(
-                    "{}: {} facts fetched in {:.1}s",
+                    "{}: {} facts, {} entities fetched in {:.1}s",
                     req.vintage(),
-                    facts.len(),
+                    conformed.facts.len(),
+                    conformed.entities.len(),
                     started.elapsed().as_secs_f64()
                 );
-                outputs.push((out_dir.join(format!("{}.jsonl", req.vintage())), facts));
+                outputs.push((req.vintage(), conformed));
             }
-            write_outputs(&outputs)
+            write_outputs(&out_dir, &outputs)
         }
     }
 }

@@ -102,3 +102,34 @@ pub enum Annotation {
     /// The API returned JSON `null` — no official annotation code accompanies it.
     Missing,
 }
+
+/// One row of the entity registry v0 (ADR-0014): what one source called a
+/// place, in one vintage. Deliberately per-source and per-vintage — ACS says
+/// "Los Angeles County, California" where PEP says "Los Angeles County";
+/// choosing a canonical form is the real registry's job, later. No
+/// deduplication here, and `build-facts` refuses only exact key repeats.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Entity {
+    pub entity_id: String,
+    pub name: String,
+    pub level: Level,
+    pub boundary_year: u16,
+    pub vintage: String,
+    pub source_dataset: String,
+}
+
+/// Geographic level. An enum rather than a string so a typo'd level is a
+/// compile error inside the engine; serde writes the lowercase wire form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Level {
+    State,
+    County,
+}
+
+/// What one conform pass produces: the facts, and the entities they mention.
+#[derive(Debug)]
+pub struct Conformed {
+    pub facts: Vec<Fact>,
+    pub entities: Vec<Entity>,
+}

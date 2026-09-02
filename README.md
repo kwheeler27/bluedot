@@ -25,15 +25,18 @@ Rendering (deck.gl / MapLibre) and the MCP server come in later stages; nothing 
 echo 'CENSUS_API_KEY=your-key' > .env          # .env is gitignored
 
 cargo run -p bluedot -- ingest acs --indicator B01003_001 --vintage 2021 --vintage 2023
-#   → data/facts/acs5-2021.jsonl, data/facts/acs5-2023.jsonl (fact schema v0, one JSON object per line)
-
 cargo run -p bluedot -- ingest pep --vintage 2022 --vintage 2023 --vintage 2024 --vintage 2025
-#   → data/facts/pep-<year>.jsonl — Population Estimates vintages (true revisions); public files, no key
+#   → data/facts/<vintage>.jsonl (fact schema v0) + data/entities/<vintage>.jsonl (registry v0)
+#     pep files are public — no key needed for that one
 
 uv run --project atlas bluedot-atlas build-facts
-#   → data/facts.parquet, then prints the demo queries (vintage axis, Connecticut boundary change, annotations)
+#   → data/facts.parquet + data/entities.parquet, then the demo queries
 
-cargo test && cargo clippy --all-targets -- -D warnings   # Rust tests + lint (offline; fixtures under crates/bluedot/tests/fixtures)
+uv run --project atlas bluedot-atlas page geoId/06037 pep:POPESTIMATE 2022-07-01
+#   → data/pages/geoId-06037.pep-POPESTIMATE.2022-07-01.html — a compiled fact page
+#     (the vintage ladder; open it in a browser straight from the file)
+
+cargo test && cargo clippy --all-targets -- -D warnings   # offline; fixtures under crates/bluedot/tests/fixtures
 ```
 
-Run everything from the repo root: the engine writes to `./data/` and the Python step reads from it. `uv` downloads and manages Python 3.13 itself; if you use pyenv, note that `atlas/.python-version` makes a bare `python3` inside `atlas/` complain — use `uv run`.
+Run everything from the repo root: the engine writes to `./data/` and the Python steps read from it. `uv` downloads and manages Python 3.13 itself; if you use pyenv, note that `atlas/.python-version` makes a bare `python3` inside `atlas/` complain — use `uv run`.
