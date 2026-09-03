@@ -90,6 +90,13 @@ become an app — a decision worth making there, not here.
   as every page (ADR-0010).
 - Stage colors encode each source's own vocabulary; county and EPA stages
   are never merged into one fake taxonomy (ADR-0015 discipline, visually).
+- **Light cartographic ground** (Kevin, 2026-09-03): paper-white map, light
+  fills, hairline boundaries, tinted study areas, muted marks — the Basin
+  register, coherent with the site's paper ground. The design deck's
+  space-dark treatment is *not* used for maps; whether it survives at all
+  is the explore-canvas brief's question.
+- True aspect always: standard-parallel-corrected projection, view height
+  derived from the map's real proportions — the country is never stretched.
 - No API keys, no accounts, in v1.
 - Pin exact versions of anything loaded from a CDN.
 
@@ -100,7 +107,7 @@ become an app — a decision worth making there, not here.
 | OpenFreeMap outage/throttling | low / med | Style-JSON swap to self-hosted Protomaps PMTiles on the same Vercel project | Tile 4xx/latency in the browser console |
 | CDN script unavailable or tampered | low / med | Pin exact version + SRI hash; page degrades to a "map unavailable" notice, dossiers unaffected | Map fails to init |
 | Vanilla-JS map page accretes features and turns to soup | med / med | Hard scope: points, popups, stage/source filter chips — anything more reopens this record | A second `<script>` block appears |
-| Basemap tiles make the page feel third-party | low / low | Muted dark style to match the deck's space-dark explore ground | It looks like a default web map |
+| Basemap tiles make the page feel third-party | low / low | Muted light cartographic style (Positron-class) restyled to the site's paper palette | It looks like a default web map |
 
 ## 7. Consequences and revisit triggers
 
