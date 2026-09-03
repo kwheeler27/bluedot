@@ -136,8 +136,12 @@ PAGE = Template("""<!doctype html>
 
 def fact_page_filename(entity_id: str, indicator_id: str, valid_from: object) -> str:
     """The one place the fact-page filename scheme lives — the site index
-    builds hrefs with it, so a drifting copy would mean broken links."""
-    return f"{entity_id}.{indicator_id}.{valid_from}".replace("/", "-").replace(":", "-") + ".html"
+    builds hrefs with it, so a drifting copy would mean broken links.
+    ``valid_from`` arrives as a date from compile_page and as a string from
+    the site's curated list; normalize both to one canonical form so the two
+    call sites can never name the same page differently."""
+    valid = date.fromisoformat(str(valid_from)).isoformat()
+    return f"{entity_id}.{indicator_id}.{valid}".replace("/", "-").replace(":", "-") + ".html"
 
 
 def compile_page(

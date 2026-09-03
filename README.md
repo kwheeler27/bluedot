@@ -10,7 +10,7 @@ Blue Dot is an AI-native atlas and almanac: you ask a question about a place, an
 
 Stage 0: one vertical slice — US county demographics from the Census ACS, end to end — plus the first domain atlas (data centers, [docs/atlas/data-centers/PLAN.md](docs/atlas/data-centers/PLAN.md)). The design is in [docs/BLUEDOT_BRIEF.md](docs/BLUEDOT_BRIEF.md), the architecture decisions in [docs/DECISIONS.md](docs/DECISIONS.md), and the competitive scan in [docs/COMPETITIVE_LANDSCAPE.md](docs/COMPETITIVE_LANDSCAPE.md).
 
-The site is static, compiled from the fact store by `bluedot-atlas site` and deployed with the Vercel CLI (`npx vercel@59.7.0 deploy --prod --yes` from `site/`); `site/` itself is gitignored — the generator is the source of truth. Automating build+deploy in CI is a queued follow-up (brief 08).
+The site is static, compiled from the fact store by `bluedot-atlas site` and deployed with the Vercel CLI from `site/`: once per machine `npx vercel@59.7.0 link --yes --project bluedot` (the link lands in `site/.vercel/`, which is gitignored along with the rest of `site/`), then `npx vercel@59.7.0 deploy --prod --yes` per release. The generator is the source of truth; automating build+deploy in CI is a queued follow-up (brief 08).
 
 ## Layout
 

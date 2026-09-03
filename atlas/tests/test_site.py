@@ -19,7 +19,7 @@ HOSTILE_NAME = '<script>alert(1)</script> "Quoted" DC'
 HOSTILE_VALUE = "</td></table><script>x</script>"
 
 
-def _mini_store(data_dir: Path) -> None:
+def _mini_store(data_dir: Path, include_echo: bool = True, ghost_claim: bool = False) -> None:
     con = duckdb.connect()
     con.execute(
         """
@@ -29,6 +29,7 @@ def _mini_store(data_dir: Path) -> None:
         INSERT INTO entities VALUES
           ('pwc/bld/aaa', ?, 'facility', 2026, 'pwc-2026-09-01', 'pwcva/build-out-analysis', 38.7, -77.5),
           ('pwc/bld/aaa', ?, 'facility', 2026, 'pwc-2026-09-02', 'pwcva/build-out-analysis', 38.7, -77.5),
+          ('pwc/bld/bbb', 'BUILDING TWO', 'facility', 2026, 'pwc-2026-09-02', 'pwcva/build-out-analysis', 38.71, -77.51),
           ('frs/123', 'EPA FACILITY ONE', 'facility', 2026, 'echo-2026-09-02', 'epa/echo/air', 38.7001, -77.5001),
           ('geoId/99', 'Testonia County', 'county', 2023, 'pep-2024', 'census/pep/co-est', NULL, NULL);
         """,
@@ -50,18 +51,39 @@ def _mini_store(data_dir: Path) -> None:
           ('pwc/bld/aaa', 'dc:gfa_sqft', DATE '2026-09-02', DATE '2026-09-03', 'pwc-2026-09-02',
            'aaa', NULL, 165230.0, 'sqft', 'PWC (Real Estate Assessments)', 'confirmed_by_record',
            DATE '2026-09-02', 'pwcva/build-out-analysis', 'https://example.gov/q', TIMESTAMP '2026-09-02 12:00:00'),
-          ('frs/123', 'dc:stage', DATE '2026-09-02', DATE '2026-09-03', 'echo-2026-09-02',
-           '123', 'operating', NULL, NULL, 'EPA ECHO', 'confirmed_by_record',
-           DATE '2026-09-02', 'epa/echo/air', 'https://example.gov/echo', TIMESTAMP '2026-09-02 12:00:00'),
-          ('frs/123', 'dc:state', DATE '2026-09-02', DATE '2026-09-03', 'echo-2026-09-02',
-           '123', 'VA', NULL, NULL, 'EPA ECHO', 'confirmed_by_record',
-           DATE '2026-09-02', 'epa/echo/air', 'https://example.gov/echo', TIMESTAMP '2026-09-02 12:00:00'),
-          ('pwc/bld/aaa', 'dc:same_as', DATE '2026-09-02', DATE '2026-09-03', 'link-2026-09-02',
-           'frs/123', 'frs/123', NULL, NULL, 'bluedot linkage v0: 30m apart', 'inferred',
-           DATE '2026-09-02', 'bluedot/linkage-v0', 'https://example.gov/q', TIMESTAMP '2026-09-02 12:00:00');
+          ('pwc/bld/bbb', 'dc:stage', DATE '2026-09-02', DATE '2026-09-03', 'pwc-2026-09-02',
+           'bbb', 'completed', NULL, NULL, 'Prince William County Planning GIS', 'confirmed_by_record',
+           DATE '2026-09-02', 'pwcva/build-out-analysis', 'https://example.gov/q', TIMESTAMP '2026-09-02 12:00:00');
         """,
         [HOSTILE_NAME, HOSTILE_VALUE],
     )
+    if include_echo:
+        con.execute(
+            """
+            INSERT INTO claims VALUES
+              ('frs/123', 'dc:stage', DATE '2026-09-02', DATE '2026-09-03', 'echo-2026-09-02',
+               '123', 'operating', NULL, NULL, 'EPA ECHO', 'confirmed_by_record',
+               DATE '2026-09-02', 'epa/echo/air', 'https://example.gov/echo', TIMESTAMP '2026-09-02 12:00:00'),
+              ('frs/123', 'dc:state', DATE '2026-09-02', DATE '2026-09-03', 'echo-2026-09-02',
+               '123', 'VA', NULL, NULL, 'EPA ECHO', 'confirmed_by_record',
+               DATE '2026-09-02', 'epa/echo/air', 'https://example.gov/echo', TIMESTAMP '2026-09-02 12:00:00'),
+              ('pwc/bld/aaa', 'dc:same_as', DATE '2026-09-02', DATE '2026-09-03', 'link-2026-09-02',
+               'frs/123', 'frs/123', NULL, NULL, 'bluedot linkage v0: 30m apart', 'inferred',
+               DATE '2026-09-02', 'bluedot/linkage-v0', 'https://example.gov/q', TIMESTAMP '2026-09-02 12:00:00'),
+              ('pwc/bld/bbb', 'dc:same_as', DATE '2026-09-02', DATE '2026-09-03', 'link-2026-09-02',
+               'frs/123', 'frs/123', NULL, NULL, 'bluedot linkage v0: 55m apart', 'inferred',
+               DATE '2026-09-02', 'bluedot/linkage-v0', 'https://example.gov/q', TIMESTAMP '2026-09-02 12:00:00');
+            """
+        )
+    if ghost_claim:
+        con.execute(
+            """
+            INSERT INTO claims VALUES
+              ('ghost/1', 'dc:stage', DATE '2026-09-02', DATE '2026-09-03', 'echo-2026-09-02',
+               'g1', 'operating', NULL, NULL, 'EPA ECHO', 'confirmed_by_record',
+               DATE '2026-09-02', 'epa/echo/air', 'https://example.gov/echo', TIMESTAMP '2026-09-02 12:00:00');
+            """
+        )
     con.execute(
         """
         CREATE TABLE facts (entity_id VARCHAR, indicator_id VARCHAR, valid_from DATE,
@@ -138,6 +160,14 @@ class SiteBuildTests(unittest.TestCase):
         self.assertIn('href="pwc-bld-aaa.html"', self._read("dc/frs-123.html"))
         self.assertIn("30m apart", self._read("dc/frs-123.html"))
 
+    def test_many_to_one_renders_multiple_linkboxes(self):
+        # Two county buildings link to the same EPA facility (the real
+        # campus-permit pattern): its dossier must show BOTH, each way.
+        frs = self._read("dc/frs-123.html")
+        self.assertEqual(frs.count("same facility (inferred)"), 2)
+        self.assertIn('href="pwc-bld-bbb.html"', frs)
+        self.assertIn('href="frs-123.html"', self._read("dc/pwc-bld-bbb.html"))
+
     def test_dc_index_directory_and_fact_index(self):
         dc = self._read("dc/index.html")
         self.assertIn('href="pwc-bld-aaa.html"', dc)
@@ -146,12 +176,57 @@ class SiteBuildTests(unittest.TestCase):
         self.assertIn("facts/geoId-99.pep-POPESTIMATE.2022-07-01.html", index)
         self.assertIn("Testonia County", index)
 
-    def test_build_is_byte_stable(self):
+    def test_rebuild_is_byte_stable_and_prunes_stale_pages(self):
         before = {p: p.read_bytes() for p in self.out.rglob("*.html")}
+        # A page left behind by an earlier build (renamed slug, re-baked
+        # entity set) must be pruned; non-HTML files must be left alone.
+        stale = self.out / "dc" / "some-renamed-entity-old-slug.html"
+        stale.write_text("stale", encoding="utf-8")
+        keep = self.out / ".vercel-keep.json"
+        keep.write_text("{}", encoding="utf-8")
         with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
             build_site(self.data, self.out)
+        self.assertFalse(stale.exists(), "stale page must be pruned")
+        self.assertTrue(keep.exists(), "non-HTML files must survive")
+        after = {p: p.read_bytes() for p in self.out.rglob("*.html")}
+        self.assertEqual(sorted(after), sorted(before), "page set must match exactly")
         for p, blob in before.items():
-            self.assertEqual(p.read_bytes(), blob, p)
+            self.assertEqual(after[p], blob, p)
+
+
+class FailLoudlyTests(unittest.TestCase):
+    def _fresh(self, **store_kwargs) -> tuple[Path, Path]:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "data").mkdir()
+        _mini_store(root / "data", **store_kwargs)
+        return root / "data", root / "site"
+
+    def test_claims_entity_without_registry_row_stops_the_build(self):
+        data, out = self._fresh(ghost_claim=True)
+        with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
+            with self.assertRaisesRegex(SystemExit, "ghost/1"):
+                build_site(data, out)
+
+    def test_source_with_no_claims_stops_the_build(self):
+        data, out = self._fresh(include_echo=False)
+        with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
+            with self.assertRaisesRegex(SystemExit, "epa/echo/air"):
+                build_site(data, out)
+
+
+class FilenameTests(unittest.TestCase):
+    def test_str_and_date_inputs_name_the_same_page(self):
+        from datetime import date
+
+        from bluedot_atlas.page import fact_page_filename
+
+        canonical = fact_page_filename("geoId/99", "pep:POPESTIMATE", "2022-07-01")
+        self.assertEqual(fact_page_filename("geoId/99", "pep:POPESTIMATE", date(2022, 7, 1)), canonical)
+        # fromisoformat accepts non-canonical ISO 8601 variants — they must
+        # normalize to the same filename, not fork it.
+        self.assertEqual(fact_page_filename("geoId/99", "pep:POPESTIMATE", "20220701"), canonical)
 
 
 if __name__ == "__main__":

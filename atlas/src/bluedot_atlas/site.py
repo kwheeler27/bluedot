@@ -255,6 +255,15 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
     (out_dir / "dc").mkdir(parents=True, exist_ok=True)
     (out_dir / "facts").mkdir(parents=True, exist_ok=True)
 
+    # Every page this run produces, so leftovers from an earlier build (a
+    # renamed slug, a re-baked entity set) can be pruned at the end — a stale
+    # dossier the store no longer backs must never stay deployed.
+    written: set[Path] = set()
+
+    def write(path: Path, text: str) -> None:
+        path.write_text(text, encoding="utf-8")
+        written.add(path.resolve())
+
     # ---- registry identity: latest vintage per entity. Safe to ORDER BY the
     # vintage label because one entity only ever has one source's vintages
     # (the cross-SOURCE lexical trap from facts.py does not apply per-entity).
@@ -268,6 +277,23 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
     ).fetchall()
     by_id = {r[0]: r for r in ents}
 
+    # Coverage invariant: every entity that carries claims gets a dossier. An
+    # entity in claims with no registry row would otherwise be dropped
+    # silently — the quiet-omission cousin of plausible-wrong.
+    unregistered = [
+        r[0]
+        for r in con.execute(
+            """SELECT DISTINCT c.entity_id FROM claims c
+               LEFT JOIN entities e ON c.entity_id = e.entity_id
+               WHERE e.entity_id IS NULL ORDER BY 1"""
+        ).fetchall()
+    ]
+    if unregistered:
+        raise SystemExit(
+            f"{len(unregistered)} entities carry claims but have no registry row "
+            f"(no dossier possible): {', '.join(unregistered[:5])}"
+        )
+
     slugs: dict[str, str] = {}
     for entity_id in by_id:
         slug = entity_slug(entity_id)
@@ -278,7 +304,7 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
     # ---- dc:same_as links, both directions (target id lives in value_text;
     # the linked pair may span sources, so resolve names via the registry).
     links = con.execute(
-        "SELECT entity_id, value_text, stated_by FROM claims WHERE attribute_id = 'dc:same_as' ORDER BY entity_id"
+        "SELECT entity_id, value_text, stated_by FROM claims WHERE attribute_id = 'dc:same_as' ORDER BY entity_id, value_text"
     ).fetchall()
     linked: dict[str, list[tuple[str, str]]] = {}
     for src, dst, evidence in links:
@@ -339,35 +365,46 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
             linkbox=linkbox,
             claim_rows="\n".join(rows),
         )
-        (out_dir / "dc" / f"{slug}.html").write_text(page, encoding="utf-8")
+        write(out_dir / "dc" / f"{slug}.html", page)
 
     # ---- DC overview tables (latest vintage per source, as in facts.py)
-    def baked(sql: str) -> list[tuple]:
-        return con.execute(sql).fetchall()
+    def baked(sql: str, params: list | None = None) -> list[tuple]:
+        return con.execute(sql, params or []).fetchall()
 
-    echo_vintage = baked("SELECT max(vintage) FROM claims WHERE source_dataset = 'epa/echo/air'")[0][0]
-    pwc_vintage = baked("SELECT max(vintage) FROM claims WHERE source_dataset = 'pwcva/build-out-analysis'")[0][0]
+    def latest_vintage(source_dataset: str) -> str:
+        got = baked("SELECT max(vintage) FROM claims WHERE source_dataset = ?", [source_dataset])[0][0]
+        if got is None:
+            # max() over nothing is NULL — a source that vanished from the
+            # store must stop the build, not render empty "vintage None" tables.
+            raise SystemExit(f"no claims at all for source {source_dataset!r} — refusing to bake empty tables")
+        return got
+
+    echo_vintage = latest_vintage("epa/echo/air")
+    pwc_vintage = latest_vintage("pwcva/build-out-analysis")
     echo_rows = baked(
-        f"""SELECT value_text, count(DISTINCT entity_id) FROM claims
-            WHERE attribute_id = 'dc:stage' AND source_dataset = 'epa/echo/air' AND vintage = '{echo_vintage}'
-            GROUP BY 1 ORDER BY 2 DESC"""
+        """SELECT value_text, count(DISTINCT entity_id) FROM claims
+           WHERE attribute_id = 'dc:stage' AND source_dataset = 'epa/echo/air' AND vintage = ?
+           GROUP BY 1 ORDER BY 2 DESC, 1""",
+        [echo_vintage],
     )
     bld_rows = baked(
-        f"""WITH sg AS (SELECT DISTINCT entity_id, value_text AS stage FROM claims
-                        WHERE attribute_id = 'dc:stage' AND vintage = '{pwc_vintage}' AND entity_id LIKE 'pwc/bld/%'),
-            g AS (SELECT entity_id, max(value_num) AS gfa FROM claims
-                  WHERE attribute_id = 'dc:gfa_sqft' AND vintage = '{pwc_vintage}' GROUP BY 1)
-            SELECT sg.stage, count(*), round(sum(g.gfa) / 1e6, 2)
-            FROM sg LEFT JOIN g USING (entity_id) GROUP BY 1 ORDER BY 2 DESC"""
+        """WITH sg AS (SELECT DISTINCT entity_id, value_text AS stage FROM claims
+                       WHERE attribute_id = 'dc:stage' AND vintage = ? AND entity_id LIKE 'pwc/bld/%'),
+           g AS (SELECT entity_id, max(value_num) AS gfa FROM claims
+                 WHERE attribute_id = 'dc:gfa_sqft' AND vintage = ? GROUP BY 1)
+           SELECT sg.stage, count(*), round(sum(g.gfa) / 1e6, 2)
+           FROM sg LEFT JOIN g USING (entity_id) GROUP BY 1 ORDER BY 2 DESC, 1""",
+        [pwc_vintage, pwc_vintage],
     )
     site_rows = baked(
-        f"""WITH st AS (SELECT entity_id, value_text AS status FROM claims
-                        WHERE attribute_id = 'dc:zoning_status' AND vintage = '{pwc_vintage}'),
-            g AS (SELECT entity_id, value_num AS gfa FROM claims
-                  WHERE attribute_id = 'dc:gfa_planned_sqft' AND vintage = '{pwc_vintage}'
-                    AND entity_id LIKE 'pwc/site/%')
-            SELECT st.status, count(*), round(sum(g.gfa) / 1e6, 2)
-            FROM st LEFT JOIN g USING (entity_id) GROUP BY 1 ORDER BY 2 DESC"""
+        """WITH st AS (SELECT entity_id, value_text AS status FROM claims
+                       WHERE attribute_id = 'dc:zoning_status' AND vintage = ?),
+           g AS (SELECT entity_id, value_num AS gfa FROM claims
+                 WHERE attribute_id = 'dc:gfa_planned_sqft' AND vintage = ?
+                   AND entity_id LIKE 'pwc/site/%')
+           SELECT st.status, count(*), round(sum(g.gfa) / 1e6, 2)
+           FROM st LEFT JOIN g USING (entity_id) GROUP BY 1 ORDER BY 2 DESC, 1""",
+        [pwc_vintage, pwc_vintage],
     )
 
     pair_rows = []
@@ -382,8 +419,8 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
     # directory: kind chip from the id scheme; state for ECHO entities
     states = dict(
         baked(
-            f"""SELECT entity_id, value_text FROM claims
-                WHERE attribute_id = 'dc:state' AND vintage = '{echo_vintage}'"""
+            "SELECT entity_id, value_text FROM claims WHERE attribute_id = 'dc:state' AND vintage = ?",
+            [echo_vintage],
         )
     )
     kinds = {"pwc/bld": "building", "pwc/campus": "campus", "pwc/site": "zoning site", "frs": "EPA facility"}
@@ -409,12 +446,13 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
         dir_rows="\n".join(dir_rows),
         as_of=_esc(as_of),
     )
-    (out_dir / "dc" / "index.html").write_text(dc_index, encoding="utf-8")
+    write(out_dir / "dc" / "index.html", dc_index)
 
     # ---- curated fact pages + front door
     fact_rows = []
     for entity_id, indicator_id, valid_from in CURATED_FACTS:
-        compile_page(data_dir, entity_id, indicator_id, valid_from, out_dir=out_dir / "facts")
+        page_path = compile_page(data_dir, entity_id, indicator_id, valid_from, out_dir=out_dir / "facts")
+        written.add(page_path.resolve())
         got = con.execute(
             """
             SELECT count(DISTINCT vintage),
@@ -440,7 +478,16 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
         fact_rows="\n".join(fact_rows),
         as_of=_esc(as_of),
     )
-    (out_dir / "index.html").write_text(index, encoding="utf-8")
+    write(out_dir / "index.html", index)
 
-    n_files = sum(1 for _ in out_dir.rglob("*.html"))
-    print(f"compiled {out_dir}/ — {n_files} pages ({len(slugs)} dossiers, {len(CURATED_FACTS)} fact ladders), store as of {as_of}")
+    # Prune pages a previous build left behind (renamed slugs, re-baked
+    # entity sets): anything .html we did not write this run is stale and
+    # must not deploy. Non-HTML files (.vercel/, favicons) are untouched.
+    stale = [p for p in out_dir.rglob("*.html") if p.resolve() not in written]
+    for p in stale:
+        p.unlink()
+    pruned = f", pruned {len(stale)} stale" if stale else ""
+    print(
+        f"compiled {out_dir}/ — {len(written)} pages ({len(slugs)} dossiers, "
+        f"{len(CURATED_FACTS)} fact ladders{pruned}), store as of {as_of}"
+    )
