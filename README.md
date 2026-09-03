@@ -4,9 +4,13 @@
 
 Blue Dot is an AI-native atlas and almanac: you ask a question about a place, and it compiles the answer — picks the public statistical data, joins the right vintages and boundaries, renders the map, and writes the narrative. Every figure it produces carries its provenance: the source, the vintage it was published in, and the geographic definition it was measured against. Underneath is a bitemporal fact store keyed on `(entity_id, indicator_id, valid_time, vintage)` and a governed semantic layer the LLM must plan against, so a question the system can't answer correctly fails loudly instead of returning a plausible number.
 
+**Live: [bluedot-xi.vercel.app](https://bluedot-xi.vercel.app)** — the compiled site: curated fact ladders and the Data Center Atlas.
+
 ## Status
 
-Stage 0: one vertical slice — US county demographics from the Census ACS, end to end. The design is in [docs/BLUEDOT_BRIEF.md](docs/BLUEDOT_BRIEF.md), the architecture decisions in [docs/DECISIONS.md](docs/DECISIONS.md), and the competitive scan in [docs/COMPETITIVE_LANDSCAPE.md](docs/COMPETITIVE_LANDSCAPE.md).
+Stage 0: one vertical slice — US county demographics from the Census ACS, end to end — plus the first domain atlas (data centers, [docs/atlas/data-centers/PLAN.md](docs/atlas/data-centers/PLAN.md)). The design is in [docs/BLUEDOT_BRIEF.md](docs/BLUEDOT_BRIEF.md), the architecture decisions in [docs/DECISIONS.md](docs/DECISIONS.md), and the competitive scan in [docs/COMPETITIVE_LANDSCAPE.md](docs/COMPETITIVE_LANDSCAPE.md).
+
+The site is static, compiled from the fact store by `bluedot-atlas site` and deployed with the Vercel CLI (`npx vercel@59.7.0 deploy --prod --yes` from `site/`); `site/` itself is gitignored — the generator is the source of truth. Automating build+deploy in CI is a queued follow-up (brief 08).
 
 ## Layout
 
