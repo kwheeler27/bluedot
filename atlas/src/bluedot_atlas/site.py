@@ -21,6 +21,7 @@ from string import Template
 
 import duckdb
 
+from .map_page import build_map_page
 from .page import compile_page, fact_page_filename
 
 # The showcase ladders. compile_page fails loudly on an unknown key, so a
@@ -104,7 +105,8 @@ INDEX = Template("""$head
       <p>$dc_count facility entities from government records — zoning
       applications, building permits, EPA air permits — including
       cross-source dossiers where two agencies describe (and sometimes
-      contradict each other about) the same building.</p></a>
+      contradict each other about) the same building — and an interactive
+      map of all of it.</p></a>
     <a class="card" href="$flagship_href"><b>Fact ladders</b>
       <p>"What did we know, and when did we know it?" — one fact, every
       vintage. Watch a county's population change as the Census revises
@@ -133,6 +135,7 @@ DC_INDEX = Template("""$head
   County, Virginia, the densest data-center county on Earth — the county's
   own building, campus, and zoning records. Capacity in compute or storage
   is never public; floor area and permit stages are.</p>
+  <p class="kicker" style="margin-top:12px"><a href="map.html">→ open the interactive map</a></p>
 
   <h2>United States — EPA air-permit registry</h2>
   <p class="kicker">facilities holding Clean Air Act permits under NAICS 518210, by lifecycle stage · vintage $echo_vintage</p>
@@ -239,7 +242,9 @@ def _tr(cells: list[tuple[str, str]]) -> str:
     return f"      <tr>{tds}</tr>"
 
 
-def build_site(data_dir: Path, out_dir: Path) -> None:
+def build_site(data_dir: Path, out_dir: Path, geo_dir: Path | None = Path("geo")) -> None:
+    # geo_dir=None is the explicit no-map escape hatch for partial stores
+    # (unit tests); the default fails loudly if the fixtures are missing.
     claims_pq = data_dir / "claims.parquet"
     entities_pq = data_dir / "entities.parquet"
     facts_pq = data_dir / "facts.parquet"
@@ -446,6 +451,8 @@ def build_site(data_dir: Path, out_dir: Path) -> None:
         dir_rows="\n".join(dir_rows),
         as_of=_esc(as_of),
     )
+    if geo_dir is not None:
+        write(out_dir / "dc" / "map.html", build_map_page(con, geo_dir, slugs, as_of))
     write(out_dir / "dc" / "index.html", dc_index)
 
     # ---- curated fact pages + front door
