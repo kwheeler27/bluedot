@@ -15,12 +15,16 @@ commands:
                                (written by the Rust engine) into DIR/facts.parquet
                                and DIR/entities.parquet, then run the demo queries
   page <entity_id> <indicator_id> <valid_from> [--data DIR]
-  link [--data DIR]            cross-source entity resolution v0: link county
-                               buildings to ECHO facilities; writes
-                               DIR/claims/link-<date>.jsonl (then re-run build-facts)
                                compile a static fact page (the vintage ladder) to
                                DIR/pages/, e.g.:
                                page geoId/06037 pep:POPESTIMATE 2022-07-01
+  link [--data DIR]            cross-source entity resolution v0: link county
+                               buildings to ECHO facilities; writes
+                               DIR/claims/link-<date>.jsonl (then re-run build-facts)
+  site [--out DIR2] [--data DIR]
+                               compile the whole public site (front door, curated
+                               fact pages, Data Center Atlas dossiers) to DIR2
+                               (default ./site) — brief 08
 
 DIR defaults to ./data — run from the repo root.
 """
@@ -68,6 +72,21 @@ def main() -> None:
         from .page import compile_page
 
         compile_page(data_dir, *rest)
+        return
+
+    if command == "site":
+        out_dir = Path("site")
+        if "--out" in rest:
+            i = rest.index("--out")
+            if i + 1 >= len(rest):
+                sys.exit(f"--out needs a value\n{USAGE}")
+            out_dir = Path(rest[i + 1])
+            rest = rest[:i] + rest[i + 2 :]
+        if rest:
+            sys.exit(f"bluedot-atlas site: unexpected arguments {rest!r}\n{USAGE}")
+        from .site import build_site
+
+        build_site(data_dir, out_dir)
         return
 
     sys.exit(f"bluedot-atlas: unknown command {command!r}\n{USAGE}")

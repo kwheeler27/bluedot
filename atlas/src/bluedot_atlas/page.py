@@ -134,7 +134,23 @@ PAGE = Template("""<!doctype html>
 """)
 
 
-def compile_page(data_dir: Path, entity_id: str, indicator_id: str, valid_from_text: str) -> Path:
+def fact_page_filename(entity_id: str, indicator_id: str, valid_from: object) -> str:
+    """The one place the fact-page filename scheme lives — the site index
+    builds hrefs with it, so a drifting copy would mean broken links.
+    ``valid_from`` arrives as a date from compile_page and as a string from
+    the site's curated list; normalize both to one canonical form so the two
+    call sites can never name the same page differently."""
+    valid = date.fromisoformat(str(valid_from)).isoformat()
+    return f"{entity_id}.{indicator_id}.{valid}".replace("/", "-").replace(":", "-") + ".html"
+
+
+def compile_page(
+    data_dir: Path,
+    entity_id: str,
+    indicator_id: str,
+    valid_from_text: str,
+    out_dir: Path | None = None,
+) -> Path:
     try:
         valid_from = date.fromisoformat(valid_from_text)
     except ValueError:
@@ -229,7 +245,7 @@ def compile_page(data_dir: Path, entity_id: str, indicator_id: str, valid_from_t
         retrieved=esc(max(r[11] for r in rows).isoformat()),
         payload=json.dumps(payload).replace("<", "\\u003c"),
     )
-    out = data_dir / "pages" / (f"{entity_id}.{indicator_id}.{valid_from}".replace("/", "-").replace(":", "-") + ".html")
+    out = (out_dir or data_dir / "pages") / fact_page_filename(entity_id, indicator_id, valid_from)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html_out, encoding="utf-8")
     print(f"compiled {out} — {len(rows)} vintages, name {name!r}")
