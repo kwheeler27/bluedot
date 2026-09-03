@@ -239,3 +239,13 @@ Each entry: **Context** (the forces) · **Decision** · **Consequences** (what g
 **Consequences.** Interpretations stay attributed (a hard rule of the constitution) while living in the same claims store as everything else. The cost: `stated_by` is doing double duty as an evidence field.
 
 **Revisit when.** Inference evidence needs structure (its own column or table) — likely when a second inference kind arrives.
+
+## ADR-0017 — Maps ship inside the compiled site; rendering-stack details move to docs/decisions/
+
+**Date:** 2026-09-02 · **Status:** Proposed
+
+**Context.** Kevin wants the Data Center Atlas on an interactive map ("like Basin"). A rendering stack is a key, expensive-to-reverse choice, and the projects-wide convention now records such choices as full decision records in `docs/decisions/`.
+
+**Decision.** The map is another compiled page: MapLibre GL JS from a pinned CDN script over GeoJSON baked by `bluedot-atlas site`, keyless basemap, no framework or JS toolchain — full record with options, risks, and the explore-canvas boundary in [docs/decisions/2026-09-02-map-rendering-stack.md](decisions/2026-09-02-map-rendering-stack.md). This file remains the home of earlier ADRs; new key decisions land in the folder.
+
+**Revisit when.** The explore-canvas brief is written, or the map needs bitemporal scrubbing / >50k points.
