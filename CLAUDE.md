@@ -34,6 +34,15 @@ Full design context: @docs/BLUEDOT_BRIEF.md
 - Prefer small vertical slices over broad scaffolding. Current focus: Stage 0
   (see brief) — ACS county demographics end to end.
 - Ask before adding dependencies or new services.
+- **Merge policy** (Kevin, 2026-09-03): Claude merges PRs in this repo
+  without waiting, once a separate agent has performed a comprehensive
+  adversarial review (correctness, silent-wrong-data risk, integration
+  risk, brief-vs-code drift) and every blocking/major finding is fixed
+  with a regression test. Still waits for Kevin: PRs that add a dependency
+  or service (the ask-first rule above), license changes, anything
+  touching secrets or keys. Monthly snapshot PRs are data-only — merge
+  after a data-sanity diff (row counts and shape vs the prior vintage),
+  no code review needed.
 - **Build and iterate.** Plans are provisional by design: ship the thin slice,
   learn from real data and real use, and let what surfaces revise the briefs,
   ADRs, mockups, and this file. Prefer reversible decisions; when we change our
