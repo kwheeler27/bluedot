@@ -145,7 +145,7 @@ PAGE = Template("""<!doctype html>
 
   <section class="frame">
     <div class="fhead">
-      <span><span class="fnum">02</span> &nbsp;<span class="ftitle">Plans are outstripping construction six to one</span></span>
+      <span><span class="fnum">02</span> &nbsp;<span class="ftitle">Plans are outstripping construction $ratio to one</span></span>
       <span class="prov">vintage $pwc_vintage · Prince William County, VA</span>
     </div>
     <div class="stage" id="stage2">
@@ -161,7 +161,8 @@ PAGE = Template("""<!doctype html>
     </div>
     <p class="cap">Each shaded shape is a campus land bay from the county GIS, colored by
     its project status — darker is more real — with the recorded buildings as dots on top.
-    85.6M sqft is entitled through zoning against 13.2M standing. Coverage caveat, honestly
+    $entitled_msqft sqft is entitled through zoning against $standing_msqft sqft standing in
+    completed buildings. Coverage caveat, honestly
     held: zoning-application sites are point records; where one lacks a campus polygon it
     appears in the <a href="index.html">atlas directory</a> rather than as land here.</p>
   </section>
@@ -324,7 +325,7 @@ function openDossier(slug) { window.location.href = slug + ".html"; }
   var svgg = svg.append("g");
   var tp = tip(document.getElementById("stage2"));
   var W = 900, Hh = 640;
-  var KX = Math.cos(38.7 * Math.PI / 180);
+  var KX = Math.cos($kx_lat * Math.PI / 180);
   var pwcF = { type: "Feature", geometry: REGION.pwc, properties: {} };
   // fit the frame to the land bays themselves (zoom-dependent detail)
   var cb = [[Infinity, Infinity], [-Infinity, -Infinity]];
@@ -448,13 +449,26 @@ def build_map_page(con, geo_dir: Path, slugs: dict[str, str], as_of: str) -> str
             raise SystemExit(
                 f"{entity_id}: stage {stage!r} has no display bucket — extend BUCKET deliberately"
             )
+        slug = slugs.get(entity_id)
+        if slug is None:
+            raise SystemExit(f"{entity_id} has claims but no dossier slug — the map never links a page that does not exist")
         pts.append([
             round(lon, 4), round(lat, 4), BUCKET[stage], stage,
             "EPA" if src == "epa/echo/air" else "county",
-            name[:52], slugs[entity_id], int(gfa),
+            name[:52], slug, int(gfa),
         ])
 
     campi = json.loads((geo_dir / "pwc-campus-planar.json").read_text())
+    bad_status = sorted({c[1] for c in campi} - {"planned", "pending", "completed"})
+    if bad_status:
+        raise SystemExit(
+            f"campus land-bay status(es) {bad_status} not in the display vocabulary — "
+            "verify against the county layer and extend deliberately"
+        )
+    region = json.loads((geo_dir / "pwc-region-planar.json").read_text())
+    kx_lat = region.get("kx_lat")
+    if not isinstance(kx_lat, (int, float)):
+        raise SystemExit("pwc-region-planar.json is missing kx_lat — the flattening latitude must travel with the fixture")
     missing = [c[3] for c in campi if f"pwc/campus/{c[3]}" not in slugs]
     if missing:
         raise SystemExit(
@@ -470,6 +484,34 @@ def build_map_page(con, geo_dir: Path, slugs: dict[str, str], as_of: str) -> str
             raise SystemExit(f"no claims for source {source!r} — refusing to bake the map")
         return got
 
+    # The frame-02 claims are computed, never typed: entitled floor area from
+    # zoning sites, standing floor area from completed buildings, both at the
+    # county's latest vintage. If either is unavailable the build stops.
+    stats = con.execute(
+        """
+        WITH latest AS (SELECT max(vintage) v FROM claims WHERE source_dataset = 'pwcva/build-out-analysis'),
+        entitled AS (SELECT sum(value_num) s FROM claims, latest
+                     WHERE attribute_id = 'dc:gfa_planned_sqft' AND vintage = latest.v
+                       AND entity_id LIKE 'pwc/site/%'),
+        done AS (SELECT entity_id FROM claims, latest
+                 WHERE attribute_id = 'dc:stage' AND value_text = 'completed'
+                   AND vintage = latest.v AND entity_id LIKE 'pwc/bld/%'),
+        g AS (SELECT entity_id, max(value_num) gfa FROM claims, latest
+              WHERE attribute_id = 'dc:gfa_sqft' AND vintage = latest.v GROUP BY 1)
+        SELECT entitled.s, (SELECT sum(g.gfa) FROM done JOIN g USING (entity_id)) FROM entitled
+        """
+    ).fetchone()
+    entitled, standing = stats
+    if not entitled or not standing:
+        raise SystemExit(
+            f"cannot compute the frame-02 claim (entitled={entitled!r}, standing={standing!r}) — "
+            "the map never ships a number the store can't back"
+        )
+    WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven",
+             8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
+    ratio_n = round(entitled / standing)
+    ratio = WORDS.get(ratio_n, str(ratio_n))
+
     esc = lambda v: html.escape(str(v), quote=True)  # noqa: E731
     return PAGE.substitute(
         n_entities=esc(f"{len(pts):,}"),
@@ -480,4 +522,8 @@ def build_map_page(con, geo_dir: Path, slugs: dict[str, str], as_of: str) -> str
         region=(geo_dir / "pwc-region-planar.json").read_text().replace("<", "\\u003c"),
         campi=_js(campi),
         pts=_js(pts),
+        kx_lat=repr(float(kx_lat)),
+        ratio=esc(ratio),
+        entitled_msqft=esc(f"{entitled / 1e6:.1f}M"),
+        standing_msqft=esc(f"{standing / 1e6:.1f}M"),
     )
