@@ -1,13 +1,28 @@
-# The map ships inside the compiled site: MapLibre over compiled GeoJSON, no framework
+# The map ships inside the compiled site: d3-geo over compiled GeoJSON, in Basin's map idiom
 
 **Date:** 2026-09-02 · **Status:** Proposed · **Scope:** Blue Dot rendering (Data Center Atlas first) · **Brief:** docs/briefs/08-site-v0.md (extends it); design deck v2 mockup 02 (the explore canvas) is the *later* stage this deliberately does not decide.
 
 The interactive map is another compiled page: `bluedot-atlas site` bakes the
-entity registry into GeoJSON, and `dc/map.html` renders it with MapLibre GL JS
-loaded from a pinned CDN script over a keyless vector basemap. No JS toolchain,
-no framework, no server — the site's static, byte-stable identity holds. deck.gl
-and any framework question are deferred to the explore-canvas decision, and
-MapLibre is chosen partly *because* deck.gl composes with it as an overlay later.
+entity registry into GeoJSON, and `dc/map.html` renders it with d3-geo +
+topojson-client (pinned CDN scripts) over embedded Census boundary geometry —
+the exact stack and design idiom of Basin's story maps, which Kevin named as
+the target ("emulate the type and design of the geographical/map visualizations
+used in ~/projects/basin"). No tile service, no external requests at view time,
+no JS toolchain, no framework — the page is fully self-contained, the strongest
+possible provenance posture. MapLibre + PMTiles remains the designated path for
+street-level context or very large point counts (it is what Basin itself uses
+for its 333k-point rights map); the framework question stays with the
+explore-canvas decision.
+
+**Design doctrine (revised 2026-09-03 after two mockup rounds):** Blue Dot maps
+adopt Basin's `docs/MAP_DESIGN.md` doctrine wholesale — one view one message,
+one saturated hue per view (hero layer; everything else recedes), mark
+vocabulary capped at graduated circles + lines + text, figure-ground near-white
+(county boundaries whisper, states one step darker), halo'd labels
+(`paint-order: stroke`), verb-led headlines, annotations on the map carrying
+the argument, tooltips as bonus color, zoom-dependent detail, still at rest.
+Light cartographic ground only (Kevin rejected space-dark); true aspect always
+(AlbersUsa nationally, conic fitted for regions).
 
 ## 1. Use cases and problems
 
@@ -37,26 +52,31 @@ compiled site.
 
 ## 3. Proposed solution
 
-`site.py` gains two outputs: `dc/atlas.geojson` (every DC entity: point,
-name, stage token, source, dossier href — same latest-vintage discipline as
-the dossiers) and `dc/map.html` (a compiled page like every other). The page
-loads `maplibre-gl` from a pinned CDN `<script>`, styles stage-colored
-circles from the GeoJSON (GFA-scaled at county zooms via style expressions),
-filters by stage/source with chips that toggle layer filters, and opens a
-popup linking to the dossier. Basemap: OpenFreeMap's public vector tiles
-(keyless, MapLibre-native); if reliability disappoints, swap to a
-self-hosted Protomaps PMTiles basemap served from the same Vercel project —
-the style JSON is the only thing that changes.
+`site.py` gains three outputs: `dc/atlas.geojson` (every DC entity: point,
+name, stage token + bucket, source, floor area, dossier href — same
+latest-vintage discipline as the dossiers), a boundaries file (Census
+cartographic state/county geometry, fetched at build time and committed like
+a fixture — TIGER direct, not the us-atlas repackage), and `dc/map.html`.
+The page loads `d3` and `topojson-client` from pinned CDN `<script>`s and
+renders two views in the Basin idiom: national (AlbersUsa, county-line
+whisper ground, one-hue graduated dots, chips choosing the hero bucket,
+d3-zoom with zoom-dependent city labels, on-map annotation into Northern
+Virginia) and county (conic fit to Prince William, study-area tint,
+fill-vs-ring encoding for built-vs-paper floor area, data-computed
+annotation). Hover tooltips carry the record; every mark clicks through to
+its dossier. The interactive mockup at
+https://claude.ai/code/artifact/5afbf4aa-47e9-4403-98ac-9fdee330e444 is this
+design running against the real 838-entity store.
 
 **High-level design.**
 
 ```mermaid
 flowchart LR
   P[(Parquet store)] --> S[bluedot-atlas site]
-  S --> G[dc/atlas.geojson]
+  C[Census TIGER boundaries] --> S
+  S --> G[dc/atlas.geojson + boundaries]
   S --> M[dc/map.html]
-  M -->|pinned CDN script| L[MapLibre GL JS]
-  M -->|vector tiles| B[OpenFreeMap basemap]
+  M -->|pinned CDN scripts| L[d3 + topojson-client]
   M -->|click-through| D[dc/&lt;slug&gt;.html dossiers]
 ```
 
@@ -69,16 +89,18 @@ remains its own brief and decision. Choropleths over ACS/PEP counties
 
 | Option | Description | Pros | Cons |
 |---|---|---|---|
-| **A. MapLibre GL JS, CDN script, compiled GeoJSON** (chosen) | `dc/map.html` as another compiled static page; pinned `<script>`; keyless basemap | Zero toolchain; keeps byte-stable compiled-site identity; brief already names MapLibre; deck.gl composes on top later; ships in one slice | Vanilla-JS page (no components) will get unwieldy if the map grows many features; basemap is a third-party dependency |
+| **A. d3-geo + topojson, Basin's story-map stack** (chosen) | Compiled static page; pinned CDN scripts; embedded Census boundaries; Basin's MAP_DESIGN doctrine | Kevin's named target, proven in Basin; fully self-contained (no tile service, no view-time requests); zero toolchain; byte-stable; the point cloud IS the message at this scale | SVG marks cap out around a few thousand points; no street-level context (roads/terrain) until the MapLibre stage |
+| A′. MapLibre GL JS + keyless tile basemap | The prior draft of this record | Street-level context; scales to huge point counts; deck.gl composes | Third-party tile service at view time; default-web-map look Kevin rejected in mockup review; Basin itself reserves it for the 333k-point layer | 
 | B. Basin-style Next.js app | Migrate the site to a framework app like Basin | Kevin knows the shape; rich interactivity; room to grow | Rewrites the whole site architecture for one page; abandons "compiled, no server" identity; front-runs the explore-canvas decision; heavy on the 8GB laptop |
 | C. kepler.gl embed | Drop kepler.gl in with the data | Instant rich UI | The design deck's explicit target is *beyond* kepler; huge bundle; not provenance-first; unbrandable |
 | D. Do nothing | Keep tables + dossiers | Zero cost | The one thing Kevin asked for stays missing; geographic data without a map |
 
-A wins because it delivers the map while changing nothing about the site's
-architecture, and it is forward-compatible with the ambitious path (deck.gl
-overlays on MapLibre; a framework can adopt the same GeoJSON contract). B
-would win only if the explore-canvas brief concludes the whole site should
-become an app — a decision worth making there, not here.
+A wins because it is the design Kevin pointed at, proven in Basin, and the
+most self-contained option — the compiled site stays free of view-time
+third-party dependencies. A′ (MapLibre) becomes the designated escalation
+when street-level context or >~5k simultaneous points arrive, mirroring
+Basin's own d3-for-story / MapLibre-for-mass split. B would win only if the
+explore-canvas brief concludes the whole site should become an app.
 
 ## 5. Design principles
 
@@ -88,8 +110,11 @@ become an app — a decision worth making there, not here.
   its dossier; no fact appears on the map that the dossier can't back.
 - Provenance on the canvas: vintage + source chip visible on the map, same
   as every page (ADR-0010).
-- Stage colors encode each source's own vocabulary; county and EPA stages
-  are never merged into one fake taxonomy (ADR-0015 discipline, visually).
+- One saturated hue; lifecycle *buckets* (built / construction / paper /
+  closed) choose the hero via chips, never four simultaneous colors. The
+  exact per-source stage lives in the tooltip and the dossier — source
+  vocabularies are bucketed for display, never merged in the store
+  (ADR-0015), and the bucket mapping is declared in code, not inferred.
 - **Light cartographic ground** (Kevin, 2026-09-03): paper-white map, light
   fills, hairline boundaries, tinted study areas, muted marks — the Basin
   register, coherent with the site's paper ground. The design deck's
@@ -104,10 +129,9 @@ become an app — a decision worth making there, not here.
 
 | Risk | Likelihood / impact | Mitigation | Early signal |
 |---|---|---|---|
-| OpenFreeMap outage/throttling | low / med | Style-JSON swap to self-hosted Protomaps PMTiles on the same Vercel project | Tile 4xx/latency in the browser console |
-| CDN script unavailable or tampered | low / med | Pin exact version + SRI hash; page degrades to a "map unavailable" notice, dossiers unaffected | Map fails to init |
+| CDN script unavailable or tampered | low / med | Pin exact versions + SRI hashes; page degrades to a "map unavailable" notice, dossiers unaffected | Map fails to init |
+| SVG performance as sources grow | med / med | The A′ escalation: hero layer moves to MapLibre/canvas past ~5k points | Frame drops while zooming the national view |
 | Vanilla-JS map page accretes features and turns to soup | med / med | Hard scope: points, popups, stage/source filter chips — anything more reopens this record | A second `<script>` block appears |
-| Basemap tiles make the page feel third-party | low / low | Muted light cartographic style (Positron-class) restyled to the site's paper palette | It looks like a default web map |
 
 ## 7. Consequences and revisit triggers
 
@@ -119,9 +143,11 @@ decision. **Revisit when:** the explore-canvas brief is written; or the map
 needs bitemporal scrubbing or >50k points (deck.gl overlay moment); or
 choropleth layers arrive with NHGIS boundaries.
 
-**Dependency ask (house rule):** `maplibre-gl` as a pinned CDN runtime
-script (no npm/package.json), and OpenFreeMap public tiles as an external
-service. Both need Kevin's approval before the build.
+**Dependency ask (house rule):** `d3` (7.9.0) and `topojson-client` (3.x)
+as pinned CDN runtime scripts — no npm, no package.json, no external
+services at view time. Census TIGER boundary geometry is fetched once at
+build time from the agency of record. Needs Kevin's approval before the
+build (merging this PR is that approval).
 
 ---
 
