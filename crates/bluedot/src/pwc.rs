@@ -5,14 +5,18 @@
 //! occupancy date, permit cases, and FOUR different floor-area figures per
 //! building (assessed / approved / permitted / taxed — different measures from
 //! different county systems, kept as separate attributes, never merged), plus
-//! campus polygons with rezoning cases and planned floor area. ArcGIS REST,
-//! `outSR=4326`, both layers under their 2,000-row page limit (verified
-//! 2026-09-02: 247 buildings, 75 campuses).
+//! campus polygons with rezoning cases and planned floor area, plus
+//! zoning-application sites (layer 11) — the county's pre-permit pipeline,
+//! the earliest public signal a data center exists. ArcGIS REST,
+//! `outSR=4326`, all three layers under their 2,000-row page limit (verified
+//! 2026-09-02: 247 buildings, 75 campuses, 61 sites).
 //!
 //! Snapshot semantics as in [`crate::echo`] (UTC vintage, one-day valid
 //! intervals), with one refinement: each record's `published_at` is the
 //! county's own `LastEditDate` where present — the county says when it last
-//! touched the record, so we use it.
+//! touched the record, so we use it. Layer 11 carries no edit dates at all
+//! (verified: null on every row), so site claims fall back to the snapshot
+//! date.
 
 use serde_json::Value;
 
@@ -47,6 +51,29 @@ const CAMPUS_STAGES: &[(&str, &str)] = &[
     ("Pending", "pending"),
     ("Planned", "planned"),
 ];
+/// Zoning application status vocabulary (layer 11, verified 2026-09-02).
+/// "By-Right" means the existing zoning already allows data-center use — no
+/// discretionary approval happens, but a site-plan record still exists.
+const SITE_STATUSES: &[(&str, &str)] = &[
+    ("Approved", "approved"),
+    ("Pending", "pending"),
+    ("By-Right", "by_right"),
+];
+/// Zoning application type vocabulary (layer 11).
+const APP_TYPES: &[(&str, &str)] = &[
+    ("Rezoning", "rezoning"),
+    ("Special Use", "special_use"),
+    ("By-Right", "by_right"),
+];
+/// Application workclass vocabulary (layer 11). "Proffer Amendment" = a
+/// change to conditions attached to an earlier rezoning of the same land.
+const WORKCLASSES: &[(&str, &str)] = &[
+    ("Proffer Amendment", "proffer_amendment"),
+    ("Non-Residential", "non_residential"),
+    ("Mixed Use", "mixed_use"),
+    ("Special Use", "special_use"),
+    ("By-Right", "by_right"),
+];
 
 #[derive(Debug, Clone)]
 pub struct Request {
@@ -69,6 +96,10 @@ impl Request {
     pub fn campuses_url(&self) -> String {
         format!("{BASE}/10/query?where=1%3D1&outFields=*&returnGeometry=true&outSR=4326&f=json")
     }
+
+    pub fn sites_url(&self) -> String {
+        format!("{BASE}/11/query?where=1%3D1&outFields=*&returnGeometry=true&outSR=4326&f=json")
+    }
 }
 
 pub struct Client {
@@ -86,7 +117,8 @@ impl Client {
         let retrieved_at = Timestamp::now();
         let buildings = self.get_text(&req.buildings_url())?;
         let campuses = self.get_text(&req.campuses_url())?;
-        conform(&buildings, &campuses, req, retrieved_at)
+        let sites = self.get_text(&req.sites_url())?;
+        conform(&buildings, &campuses, &sites, req, retrieved_at)
     }
 
     fn get_text(&self, url: &str) -> Result<String, Error> {
@@ -127,10 +159,11 @@ pub struct Conformed {
     pub claims: Vec<Claim>,
 }
 
-/// Pure conformance over the two layers' query responses.
+/// Pure conformance over the three layers' query responses.
 pub fn conform(
     buildings_body: &str,
     campuses_body: &str,
+    sites_body: &str,
     req: &Request,
     retrieved_at: Timestamp,
 ) -> Result<Conformed, Error> {
@@ -152,6 +185,14 @@ pub fn conform(
         &mut entities,
         &mut claims,
     )?;
+    conform_layer(
+        sites_body,
+        LayerKind::Site,
+        req,
+        retrieved_at,
+        &mut entities,
+        &mut claims,
+    )?;
     ensure_unique_claim_keys(&claims)?;
     Ok(Conformed { entities, claims })
 }
@@ -160,6 +201,7 @@ pub fn conform(
 enum LayerKind {
     Building,
     Campus,
+    Site,
 }
 
 fn conform_layer(
@@ -173,6 +215,7 @@ fn conform_layer(
     let url = match kind {
         LayerKind::Building => req.buildings_url(),
         LayerKind::Campus => req.campuses_url(),
+        LayerKind::Site => req.sites_url(),
     };
     let shape_err = |detail: String| Error::BadResponseShape {
         url: url.clone(),
@@ -231,6 +274,7 @@ fn conform_layer(
                 CAMPUS_STAGES,
                 need("ProjectStatus")?,
             ),
+            LayerKind::Site => ("pwc/site", s("CaseName"), SITE_STATUSES, need("Status")?),
         };
         let name = name
             .map(str::to_owned)
@@ -241,7 +285,7 @@ fn conform_layer(
         // rings — we take the mean of the outer ring's vertices as a label
         // point (an approximation for display, not survey geometry).
         let (lon, lat) = match kind {
-            LayerKind::Building => (
+            LayerKind::Building | LayerKind::Site => (
                 row["geometry"]["x"]
                     .as_f64()
                     .ok_or_else(|| shape_err(format!("row {}: no geometry.x", i + 1)))?,
@@ -284,10 +328,12 @@ fn conform_layer(
         entities.push(Entity {
             entity_id: entity_id.clone(),
             name: name.clone(),
-            level: if kind == LayerKind::Building {
-                Level::Facility
-            } else {
-                Level::Campus
+            level: match kind {
+                LayerKind::Building => Level::Facility,
+                // A zoning site is campus-granularity land: where it sits in
+                // the lifecycle is a claim (dc:zoning_status), not a level —
+                // same reasoning that lets layer 10 hold "Planned" campuses.
+                LayerKind::Campus | LayerKind::Site => Level::Campus,
             },
             boundary_year: req.snapshot.year as u16,
             vintage: vintage.clone(),
@@ -331,11 +377,20 @@ fn conform_layer(
             .find(|(raw, _)| *raw == stage_raw)
             .map(|(_, token)| *token)
             .ok_or_else(|| shape_err(format!("row {}: status {stage_raw:?} not in the known vocabulary — verify against the county layer and extend deliberately", i + 1)))?;
-        push_text("dc:stage", stage.to_owned(), None, None);
         push_text("dc:recorded_name", name, None, None);
+
+        // A helper for layer 11's three closed vocabularies beyond status.
+        let in_vocab = |vocab: &'static [(&str, &str)], raw: &str, what: &'static str| {
+            vocab
+                .iter()
+                .find(|(r, _)| *r == raw)
+                .map(|(_, token)| *token)
+                .ok_or_else(|| shape_err(format!("row {}: {what} {raw:?} unknown", i + 1)))
+        };
 
         match kind {
             LayerKind::Building => {
+                push_text("dc:stage", stage.to_owned(), None, None);
                 if let Some(addr) = s("Address") {
                     push_text("dc:address", addr.to_owned(), None, None);
                 }
@@ -391,6 +446,7 @@ fn conform_layer(
                 }
             }
             LayerKind::Campus => {
+                push_text("dc:stage", stage.to_owned(), None, None);
                 if let Some(case) = s("CaseNumber") {
                     push_text("dc:zoning_case", case.to_owned(), None, None);
                 }
@@ -414,6 +470,68 @@ fn conform_layer(
                     push_num("dc:acreage", a, "acres");
                 }
             }
+            LayerKind::Site => {
+                // The zoning case is the asserting record for the claims
+                // that describe the application itself — the `PermitCase`
+                // convention from layer 9. A case can span several parcels
+                // (six cases cover 2-3 sites each, verified 2026-09-02),
+                // which is why the entity key is GlobalID, not the case.
+                let case = need("ZoningCaseNumber")?;
+                push_text(
+                    "dc:zoning_status",
+                    stage.to_owned(),
+                    Some(case.clone()),
+                    None,
+                );
+                let app_type = in_vocab(APP_TYPES, &need("AppType")?, "application type")?;
+                push_text(
+                    "dc:application_type",
+                    app_type.to_owned(),
+                    Some(case.clone()),
+                    None,
+                );
+                let workclass = in_vocab(WORKCLASSES, &need("Workclass")?, "workclass")?;
+                push_text(
+                    "dc:application_workclass",
+                    workclass.to_owned(),
+                    Some(case.clone()),
+                    None,
+                );
+                if let Some(ms) = attrs["AppAccDate"].as_i64() {
+                    let d = Date::from_unix_days(ms.div_euclid(86_400_000));
+                    push_text(
+                        "dc:application_accepted",
+                        d.to_string(),
+                        Some(case.clone()),
+                        None,
+                    );
+                }
+                push_text("dc:zoning_case", case, None, None);
+                // District codes (M-2, PBD, ...) are an open set — recorded
+                // verbatim, unlike the closed status vocabularies above.
+                if let Some(z) = s("Zoned") {
+                    push_text("dc:zoning_district", z.to_owned(), None, None);
+                }
+                if let Some(addr) = s("Address") {
+                    push_text("dc:address", addr.to_owned(), None, None);
+                }
+                let mut push_num = |attribute: &str, v: f64, unit: &str| {
+                    claims.push(Claim {
+                        attribute_id: attribute.to_owned(),
+                        value_num: Some(v),
+                        unit: Some(unit.to_owned()),
+                        ..template.clone()
+                    });
+                };
+                // Site GFA is entitled/proposed floor area — the same
+                // semantic as layer 10's PlannedGFA, so the same attribute.
+                if let Some(g) = n("GFA") {
+                    push_num("dc:gfa_planned_sqft", g, "sqft");
+                }
+                if let Some(a) = n("Acreage") {
+                    push_num("dc:acreage", a, "acres");
+                }
+            }
         }
     }
     Ok(())
@@ -425,15 +543,21 @@ mod tests {
 
     // Real rows captured 2026-09-02: 5 buildings (all four statuses, Iron
     // Mountain VA-1, one zero-GFA under-construction) + 3 campuses (all three
-    // statuses), geometry included.
+    // statuses) + 6 zoning sites (all three statuses, every application type
+    // and workclass, and two Amazon by-right sites sharing one case number),
+    // geometry included.
     const SUBSET: &str = include_str!("../tests/fixtures/pwc-subset.json");
     const T0: Timestamp = Timestamp {
         unix_seconds: 1_756_800_000,
     };
 
-    fn bodies() -> (String, String) {
+    fn bodies() -> (String, String, String) {
         let v: serde_json::Value = serde_json::from_str(SUBSET).unwrap();
-        (v["buildings"].to_string(), v["campuses"].to_string())
+        (
+            v["buildings"].to_string(),
+            v["campuses"].to_string(),
+            v["sites"].to_string(),
+        )
     }
 
     fn req() -> Request {
@@ -442,9 +566,9 @@ mod tests {
 
     #[test]
     fn conforms_buildings_and_campuses() {
-        let (b, c) = bodies();
-        let out = conform(&b, &c, &req(), T0).unwrap();
-        assert_eq!(out.entities.len(), 8);
+        let (b, c, s) = bodies();
+        let out = conform(&b, &c, &s, &req(), T0).unwrap();
+        assert_eq!(out.entities.len(), 14);
         assert_eq!(
             out.entities
                 .iter()
@@ -457,7 +581,14 @@ mod tests {
                 .iter()
                 .filter(|e| e.level == Level::Campus)
                 .count(),
-            3
+            9
+        );
+        assert_eq!(
+            out.entities
+                .iter()
+                .filter(|e| e.entity_id.starts_with("pwc/site/"))
+                .count(),
+            6
         );
         assert!(
             out.entities
@@ -550,35 +681,138 @@ mod tests {
             !campus.entity_id.contains('{'),
             "GUID braces must be stripped"
         );
+
+        // Zoning sites: a site is a Campus-level entity; its application
+        // status is dc:zoning_status (never dc:stage), asserted by the case.
+        let gainesville = out
+            .entities
+            .iter()
+            .find(|e| e.name.starts_with("Gainesville East"))
+            .unwrap();
+        assert_eq!(gainesville.level, Level::Campus);
+        let gfrag = gainesville.entity_id.strip_prefix("pwc/site/").unwrap();
+        assert!(by(gfrag, "dc:stage").is_none());
+        let status = by(gfrag, "dc:zoning_status").unwrap();
+        assert_eq!(status.value_text.as_deref(), Some("pending"));
+        assert_eq!(status.source_record, "SUP2023-00006");
+        assert_eq!(
+            by(gfrag, "dc:application_type")
+                .unwrap()
+                .value_text
+                .as_deref(),
+            Some("special_use")
+        );
+        assert_eq!(
+            by(gfrag, "dc:application_accepted")
+                .unwrap()
+                .value_text
+                .as_deref(),
+            Some("2022-11-14")
+        );
+        // Layer 11 has no LastEditDate — published_at falls back to snapshot.
+        assert_eq!(status.published_at, Date::new(2026, 9, 2));
+
+        // Bethlehem: entitled GFA + open-set district code recorded verbatim.
+        let beth = out
+            .entities
+            .iter()
+            .find(|e| e.name.starts_with("Bethlehem"))
+            .unwrap();
+        let bfrag = beth.entity_id.strip_prefix("pwc/site/").unwrap();
+        let gfa = by(bfrag, "dc:gfa_planned_sqft").unwrap();
+        assert_eq!(gfa.value_num, Some(719_742.0));
+        assert_eq!(by(bfrag, "dc:acreage").unwrap().value_num, Some(45.46));
+        assert_eq!(
+            by(bfrag, "dc:zoning_district")
+                .unwrap()
+                .value_text
+                .as_deref(),
+            Some("M-2")
+        );
+        assert_eq!(
+            by(bfrag, "dc:zoning_status").unwrap().value_text.as_deref(),
+            Some("approved")
+        );
+
+        // Two Amazon by-right sites share one case number: the case is a
+        // claim on each, and the entities stay distinct (GlobalID keys).
+        let amazon: Vec<_> = out
+            .claims
+            .iter()
+            .filter(|cl| {
+                cl.attribute_id == "dc:zoning_case"
+                    && cl.value_text.as_deref() == Some("REZ1969-0021")
+            })
+            .collect();
+        assert_eq!(amazon.len(), 2);
+        assert_ne!(amazon[0].entity_id, amazon[1].entity_id);
+        let iad7 = out
+            .entities
+            .iter()
+            .find(|e| e.name == "Amazon AWS IAD 7")
+            .unwrap();
+        let afrag = iad7.entity_id.strip_prefix("pwc/site/").unwrap();
+        assert_eq!(
+            by(afrag, "dc:zoning_status").unwrap().value_text.as_deref(),
+            Some("by_right")
+        );
+        assert_eq!(
+            by(afrag, "dc:application_workclass")
+                .unwrap()
+                .value_text
+                .as_deref(),
+            Some("by_right")
+        );
     }
 
     #[test]
     fn refuses_what_it_does_not_understand() {
-        let (b, c) = bodies();
-        let err = |bb: &str, cc: &str| conform(bb, cc, &req(), T0).unwrap_err();
+        let (b, c, s) = bodies();
+        let err = |bb: &str, cc: &str, ss: &str| conform(bb, cc, ss, &req(), T0).unwrap_err();
 
-        let unknown = err(&b.replacen("Under Construction", "Vibes", 1), &c);
+        let unknown = err(&b.replacen("Under Construction", "Vibes", 1), &c, &s);
         assert!(
             matches!(&unknown, Error::BadResponseShape { detail, .. } if detail.contains("Vibes")),
             "{unknown}"
         );
 
-        let empty = err(r#"{"features":[]}"#, &c);
+        let empty = err(r#"{"features":[]}"#, &c, &s);
         assert!(
             matches!(&empty, Error::BadResponseShape { detail, .. } if detail.contains("zero")),
             "{empty}"
         );
 
-        let arcgis = err(r#"{"error":{"code":400,"message":"boom"}}"#, &c);
+        let arcgis = err(r#"{"error":{"code":400,"message":"boom"}}"#, &c, &s);
         assert!(
             matches!(&arcgis, Error::BadResponseShape { detail, .. } if detail.contains("boom")),
             "{arcgis}"
         );
 
-        let no_gid = err(&b.replacen("GlobalID", "GoneID", 1), &c);
+        let no_gid = err(&b.replacen("GlobalID", "GoneID", 1), &c, &s);
         assert!(
             matches!(&no_gid, Error::BadResponseShape { detail, .. } if detail.contains("GlobalID")),
             "{no_gid}"
+        );
+
+        // Site-layer refusals: unknown status ("Pending" appears exactly once
+        // in the fixture — Gainesville East), unknown workclass ("Mixed Use"
+        // likewise — Aura), and a missing zoning case number.
+        let bad_status = err(&b, &c, &s.replacen("Pending", "Vibes", 1));
+        assert!(
+            matches!(&bad_status, Error::BadResponseShape { detail, .. } if detail.contains("Vibes")),
+            "{bad_status}"
+        );
+
+        let bad_workclass = err(&b, &c, &s.replacen("Mixed Use", "Vibes", 1));
+        assert!(
+            matches!(&bad_workclass, Error::BadResponseShape { detail, .. } if detail.contains("workclass")),
+            "{bad_workclass}"
+        );
+
+        let no_case = err(&b, &c, &s.replacen("ZoningCaseNumber", "ZoningGone", 1));
+        assert!(
+            matches!(&no_case, Error::BadResponseShape { detail, .. } if detail.contains("ZoningCaseNumber")),
+            "{no_case}"
         );
     }
 }

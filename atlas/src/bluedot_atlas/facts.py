@@ -290,4 +290,19 @@ def build_facts(data_dir: Path) -> Path:
               AND c.attribute_id IN ('dc:recorded_name','dc:stage','dc:gfa_sqft','dc:occupied_date','dc:year_built')
             ORDER BY c.entity_id, c.attribute_id
         """).show(max_width=140)
+        print("(l) Prince William County entitlement pipeline — zoning sites")
+        print("    (dc:zoning_status is application status, deliberately not dc:stage)")
+        con.sql("""
+            WITH latest AS (SELECT max(vintage) AS v FROM claims
+                            WHERE source_dataset = 'pwcva/build-out-analysis'),
+            st AS (SELECT entity_id, value_text AS status FROM claims, latest
+                   WHERE attribute_id = 'dc:zoning_status' AND vintage = latest.v),
+            g AS (SELECT entity_id, value_num AS gfa FROM claims, latest
+                  WHERE attribute_id = 'dc:gfa_planned_sqft' AND vintage = latest.v
+                    AND entity_id LIKE 'pwc/site/%')
+            SELECT st.status, count(*) AS sites,
+                   round(sum(g.gfa) / 1e6, 2) AS entitled_msqft
+            FROM st LEFT JOIN g USING (entity_id)
+            GROUP BY 1 ORDER BY sites DESC
+        """).show()
     return out
