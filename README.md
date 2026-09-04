@@ -10,7 +10,7 @@ Blue Dot is an AI-native atlas and almanac: you ask a question about a place, an
 
 Stage 0: one vertical slice — US county demographics from the Census ACS, end to end — plus the first domain atlas (data centers, [docs/atlas/data-centers/PLAN.md](docs/atlas/data-centers/PLAN.md)). The design is in [docs/BLUEDOT_BRIEF.md](docs/BLUEDOT_BRIEF.md), the architecture decisions in [docs/DECISIONS.md](docs/DECISIONS.md), and the competitive scan in [docs/COMPETITIVE_LANDSCAPE.md](docs/COMPETITIVE_LANDSCAPE.md).
 
-The site is static, compiled from the committed store by `bluedot-atlas site`. **Deploys are automatic**: merging to `main` runs `.github/workflows/deploy.yml`, which tests, rebuilds, and publishes to production (decision [2026-09-04](docs/decisions/2026-09-04-ci-build-and-deploy.md)). The conformed JSONL vintages are in `data/`, so a fresh clone builds the whole site with no credentials; `site/` and the parquet are derived and gitignored. Deploy from a laptop only during a Vercel outage.
+The site is static, compiled from the committed store by `bluedot-atlas site`. **Deploys are automatic**: merging to `main` runs `.github/workflows/deploy.yml`, which tests, rebuilds, and publishes to production (decision [2026-09-04](docs/decisions/2026-09-04-ci-build-and-deploy.md)). The conformed JSONL vintages are in `data/`, so a fresh clone builds the whole site with no credentials; `site/` and the parquet are derived and gitignored. The deploy gates on tests and on **map QA** (`npm run qa:map` — renders the compiled map in a headless browser and fails if marks stop painting), so a rendering regression blocks the deploy instead of publishing; screenshots are kept as a run artifact. Deploy from a laptop only during a Vercel outage.
 
 ## Layout
 

@@ -29,3 +29,5 @@ data/pages/
 .DS_Store
 .idea/
 /site/
+/node_modules/
+/.qa/
