@@ -68,6 +68,7 @@ STYLE = """
   .chip{display:inline-block; font-family:var(--mono); font-size:10.5px; border:1px solid var(--hair);
         border-radius:2px; padding:1px 6px; color:var(--soft)}
   .chip.amber{border-color:var(--amber); color:var(--amber-deep)}
+  td.inferred{color:var(--amber-deep); font-weight:600}
   .linkbox{background:#FBF6EA; border:1px solid var(--amber); border-radius:4px; padding:12px 16px;
            font-family:var(--mono); font-size:12.5px; margin:18px 0}
   ul.dir{list-style:none; padding:0; margin:10px 0 0; font-family:var(--mono); font-size:13px}
@@ -355,7 +356,9 @@ def build_site(data_dir: Path, out_dir: Path, geo_dir: Path | None = Path("geo")
                         ("", record),
                         ("", vintage),
                         ("", published.isoformat()),
-                        ("", conf),
+                        # Blue Dot's own inferences must never read as source
+                        # assertions (DESIGN_PRINCIPLES §4)
+                        ("inferred" if conf == "inferred" else "", conf),
                     ]
                 )
             )

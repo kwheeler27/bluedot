@@ -155,6 +155,13 @@ class SiteBuildTests(unittest.TestCase):
         self.assertIn("165,230", dossier)
         self.assertIn("Real Estate Assessments", dossier)
 
+    def test_inferred_claims_render_visibly_distinct(self):
+        # DESIGN_PRINCIPLES §4: Blue Dot's own inferences never read as
+        # source assertions — the confidence cell carries a styling class.
+        dossier = self._read("dc/pwc-bld-aaa.html")
+        self.assertIn('<td class="inferred">inferred</td>', dossier)
+        self.assertNotIn('<td class="inferred">confirmed_by_record</td>', dossier)
+
     def test_same_as_cross_links_both_directions(self):
         self.assertIn('href="frs-123.html"', self._read("dc/pwc-bld-aaa.html"))
         self.assertIn('href="pwc-bld-aaa.html"', self._read("dc/frs-123.html"))

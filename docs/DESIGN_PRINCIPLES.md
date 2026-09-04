@@ -165,7 +165,9 @@ decision record). The **badge set and teaching affordances are [bound at
 first surface]**: the dossier's confidence column and the fact page's
 "registry pending" chip are the first two badge-like marks — when a third
 appears, the closed set gets written down and these two join it
-retroactively. Screenshot test unchanged: any two compiled pages side by
+retroactively. **Dark mode is likewise [bound at first surface]**: every
+compiled page today is deliberately single-theme light; when a second
+theme arrives it is designed, never inverted, per the shared rule. Screenshot test unchanged: any two compiled pages side by
 side read as one product.
 
 ## 10. The product never claims more authority than it has
