@@ -141,3 +141,17 @@ pub struct Conformed {
     pub facts: Vec<Fact>,
     pub entities: Vec<Entity>,
 }
+
+/// Captured source geometry for one entity in one vintage (brief 09).
+///
+/// Rings are lon/lat exactly as the source publishes them — outer ring
+/// first, holes after, unsimplified. Simplification and projection are
+/// display concerns that happen at compile time, never at ingest.
+#[derive(Debug, Clone, Serialize)]
+pub struct Geometry {
+    pub entity_id: String,
+    pub vintage: String,
+    pub source_dataset: String,
+    pub rings: Vec<Vec<[f64; 2]>>,
+    pub retrieved_at: Timestamp,
+}

@@ -258,6 +258,9 @@ def build_site(data_dir: Path, out_dir: Path, geo_dir: Path | None = Path("geo")
     q = lambda p: str(p).replace("'", "''")  # noqa: E731
     con.execute(f"CREATE VIEW claims AS SELECT * FROM read_parquet('{q(claims_pq)}')")
     con.execute(f"CREATE VIEW entities AS SELECT * FROM read_parquet('{q(entities_pq)}')")
+    geometry_pq = data_dir / "geometry.parquet"
+    if geometry_pq.exists():
+        con.execute(f"CREATE VIEW geometry AS SELECT * FROM read_parquet('{q(geometry_pq)}')")
     (out_dir / "dc").mkdir(parents=True, exist_ok=True)
     (out_dir / "facts").mkdir(parents=True, exist_ok=True)
 

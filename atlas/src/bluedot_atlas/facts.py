@@ -232,6 +232,26 @@ def build_facts(data_dir: Path) -> Path:
         (n_claims,) = con.execute("SELECT count(*) FROM claims").fetchone()
         print(f"wrote {cout} — {n_claims} claims from {len(claim_files)} files")
 
+    geometry_files = sorted((data_dir / "geometry").glob("*.jsonl"))
+    if geometry_files:
+        # rings stay a JSON string column: the map compiler is the only
+        # consumer and DuckDB nesting buys nothing here (brief 09)
+        con.execute(
+            "CREATE TABLE geometry AS SELECT * FROM read_json(?, format = 'newline_delimited', "
+            "columns = {'entity_id': 'VARCHAR', 'vintage': 'VARCHAR', 'source_dataset': 'VARCHAR', "
+            "'rings': 'JSON', 'retrieved_at': 'TIMESTAMP'})",
+            [[str(f) for f in geometry_files]],
+        )
+        (gdups,) = con.execute(
+            "SELECT count(*) FROM (SELECT entity_id, vintage FROM geometry GROUP BY ALL HAVING count(*) > 1)"
+        ).fetchone()
+        if gdups:
+            raise SystemExit(f"{gdups} duplicate geometry keys — refusing to write geometry.parquet")
+        gout = data_dir / "geometry.parquet"
+        con.execute(f"COPY geometry TO '{str(gout).replace(chr(39), chr(39) * 2)}' (FORMAT PARQUET)")
+        (n_geoms,) = con.execute("SELECT count(*) FROM geometry").fetchone()
+        print(f"wrote {gout} — {n_geoms} geometries from {len(geometry_files)} files")
+
     (n_rows,) = con.execute("SELECT count(*) FROM facts").fetchone()
     per_file = con.execute("SELECT vintage, count(*) FROM facts GROUP BY ALL ORDER BY vintage").fetchall()
     print(f"wrote {out} — {n_rows} facts from {len(files)} files: "

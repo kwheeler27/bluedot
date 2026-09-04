@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::Error;
 use crate::claim::{Claim, Confidence, ensure_unique_claim_keys};
-use crate::fact::{Entity, Level};
+use crate::fact::{Entity, Geometry, Level};
 use crate::http;
 use crate::time::{Date, Timestamp};
 
@@ -157,6 +157,7 @@ impl Default for Client {
 pub struct Conformed {
     pub entities: Vec<Entity>,
     pub claims: Vec<Claim>,
+    pub geometries: Vec<Geometry>,
 }
 
 /// Pure conformance over the three layers' query responses.
@@ -169,6 +170,7 @@ pub fn conform(
 ) -> Result<Conformed, Error> {
     let mut entities = Vec::new();
     let mut claims = Vec::new();
+    let mut geometries = Vec::new();
     conform_layer(
         buildings_body,
         LayerKind::Building,
@@ -176,6 +178,7 @@ pub fn conform(
         retrieved_at,
         &mut entities,
         &mut claims,
+        &mut geometries,
     )?;
     conform_layer(
         campuses_body,
@@ -184,6 +187,7 @@ pub fn conform(
         retrieved_at,
         &mut entities,
         &mut claims,
+        &mut geometries,
     )?;
     conform_layer(
         sites_body,
@@ -192,9 +196,14 @@ pub fn conform(
         retrieved_at,
         &mut entities,
         &mut claims,
+        &mut geometries,
     )?;
     ensure_unique_claim_keys(&claims)?;
-    Ok(Conformed { entities, claims })
+    Ok(Conformed {
+        entities,
+        claims,
+        geometries,
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -211,6 +220,7 @@ fn conform_layer(
     retrieved_at: Timestamp,
     entities: &mut Vec<Entity>,
     claims: &mut Vec<Claim>,
+    geometries: &mut Vec<Geometry>,
 ) -> Result<(), Error> {
     let url = match kind {
         LayerKind::Building => req.buildings_url(),
@@ -294,24 +304,53 @@ fn conform_layer(
                     .ok_or_else(|| shape_err(format!("row {}: no geometry.y", i + 1)))?,
             ),
             LayerKind::Campus => {
-                let ring = row["geometry"]["rings"][0]
+                // Capture every ring, fully validated — the polygons are data
+                // now (brief 09), not just raw material for a label point.
+                let raw = row["geometry"]["rings"]
                     .as_array()
                     .filter(|r| !r.is_empty())
-                    .ok_or_else(|| shape_err(format!("row {}: no polygon ring", i + 1)))?;
-                // Closed rings repeat the first vertex at the end — drop the
-                // repeat so it isn't double-weighted in the mean.
-                let closed = ring.len() > 1 && ring.first() == ring.last();
-                let ring = &ring[..ring.len() - usize::from(closed)];
-                let mut sx = 0.0;
-                let mut sy = 0.0;
-                for v in ring {
-                    sx += v[0].as_f64().unwrap_or(f64::NAN);
-                    sy += v[1].as_f64().unwrap_or(f64::NAN);
+                    .ok_or_else(|| shape_err(format!("row {}: no polygon rings", i + 1)))?;
+                let mut rings: Vec<Vec<[f64; 2]>> = Vec::with_capacity(raw.len());
+                for ring in raw {
+                    let ring = ring
+                        .as_array()
+                        .filter(|r| r.len() >= 3)
+                        .ok_or_else(|| shape_err(format!("row {}: degenerate ring", i + 1)))?;
+                    let mut out = Vec::with_capacity(ring.len());
+                    for v in ring {
+                        // `let ... else` (Rust 1.65+): bind or bail in one step,
+                        // without an Option dance.
+                        let (Some(x), Some(y)) = (v[0].as_f64(), v[1].as_f64()) else {
+                            return Err(shape_err(format!("row {}: unparseable ring vertex", i + 1)));
+                        };
+                        // Defensive: JSON numbers cannot encode NaN/Inf, so
+                        // this is unreachable via valid JSON — kept as a
+                        // cheap invariant, not tested behavior.
+                        if !x.is_finite() || !y.is_finite() {
+                            return Err(shape_err(format!("row {}: non-finite ring vertex", i + 1)));
+                        }
+                        out.push([x, y]);
+                    }
+                    rings.push(out);
                 }
-                let c = (sx / ring.len() as f64, sy / ring.len() as f64);
-                if !c.0.is_finite() || !c.1.is_finite() {
-                    return Err(shape_err(format!("row {}: unparseable ring vertex", i + 1)));
+                // Label point: mean of the outer ring, with a closed ring's
+                // repeated last vertex dropped so it isn't double-weighted.
+                let outer = &rings[0];
+                let closed = outer.len() > 1 && outer.first() == outer.last();
+                let outer = &outer[..outer.len() - usize::from(closed)];
+                let (mut sx, mut sy) = (0.0, 0.0);
+                for v in outer {
+                    sx += v[0];
+                    sy += v[1];
                 }
+                let c = (sx / outer.len() as f64, sy / outer.len() as f64);
+                geometries.push(Geometry {
+                    entity_id: entity_id.clone(),
+                    vintage: vintage.clone(),
+                    source_dataset: DATASET.to_owned(),
+                    rings,
+                    retrieved_at,
+                });
                 c
             }
         };
@@ -667,6 +706,18 @@ mod tests {
             Some(0.0)
         );
 
+        // campus polygons are captured as data (brief 09): one geometry
+        // per campus, none for point layers, rings validated
+        assert_eq!(out.geometries.len(), 3);
+        assert!(
+            out.geometries
+                .iter()
+                .all(|g| g.entity_id.starts_with("pwc/campus/")
+                    && !g.rings.is_empty()
+                    && g.rings[0].len() >= 3
+                    && g.vintage == out.entities[0].vintage)
+        );
+
         // campuses: stage + zoning case + planned GFA
         let campus = out
             .entities
@@ -807,6 +858,13 @@ mod tests {
         assert!(
             matches!(&bad_workclass, Error::BadResponseShape { detail, .. } if detail.contains("workclass")),
             "{bad_workclass}"
+        );
+
+        // a campus ring vertex the source corrupted must refuse, not skew
+        let bad_vertex = err(&b, &c.replacen("[[[", "[[[\"x\",", 1), &s);
+        assert!(
+            matches!(&bad_vertex, Error::BadResponseShape { detail, .. } if detail.contains("unparseable ring vertex")),
+            "{bad_vertex}"
         );
 
         let no_case = err(&b, &c, &s.replacen("ZoningCaseNumber", "ZoningGone", 1));
