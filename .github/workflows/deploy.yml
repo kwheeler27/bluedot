@@ -30,6 +30,16 @@ jobs:
         run: uv run --project atlas bluedot-atlas build-facts
       - name: Compile the site
         run: uv run --project atlas bluedot-atlas site
+      - name: Check the deploy credential
+        # A missing secret should say so in one line, not surface as a
+        # cryptic Vercel CLI error twenty lines into a log.
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::VERCEL_TOKEN is not set. Create a token scoped to the bluedot project (Vercel → Settings → Tokens) and add it as a repository secret. The site build above succeeded; only the deploy is blocked."
+            exit 1
+          fi
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       - name: Deploy to production
         # Pinned: 59.10.0 is broken ("fetch failed"); 59.7.0 is the known-good line.
         run: npx -y vercel@59.7.0 deploy --prod --yes --token "$VERCEL_TOKEN" --cwd site
