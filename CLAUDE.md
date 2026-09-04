@@ -43,6 +43,10 @@ Full design context: @docs/BLUEDOT_BRIEF.md
   touching secrets or keys. Monthly snapshot PRs are data-only — merge
   after a data-sanity diff (row counts and shape vs the prior vintage),
   no code review needed.
+- Design doctrine: `docs/DESIGN_PRINCIPLES.md` (seeded from the shared
+  cross-project file — specialize, never contradict). Stage 0 reviews check
+  new work against §4–§6 (provenance, accounting bridges, gaps): those three
+  bind the data-model decisions being made right now.
 - **Build and iterate.** Plans are provisional by design: ship the thin slice,
   learn from real data and real use, and let what surfaces revise the briefs,
   ADRs, mockups, and this file. Prefer reversible decisions; when we change our
