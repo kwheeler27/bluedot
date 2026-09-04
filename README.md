@@ -10,7 +10,7 @@ Blue Dot is an AI-native atlas and almanac: you ask a question about a place, an
 
 Stage 0: one vertical slice — US county demographics from the Census ACS, end to end — plus the first domain atlas (data centers, [docs/atlas/data-centers/PLAN.md](docs/atlas/data-centers/PLAN.md)). The design is in [docs/BLUEDOT_BRIEF.md](docs/BLUEDOT_BRIEF.md), the architecture decisions in [docs/DECISIONS.md](docs/DECISIONS.md), and the competitive scan in [docs/COMPETITIVE_LANDSCAPE.md](docs/COMPETITIVE_LANDSCAPE.md).
 
-The site is static, compiled from the fact store by `bluedot-atlas site` and deployed with the Vercel CLI from `site/`: once per machine `npx vercel@59.7.0 link --yes --project bluedot` (the link lands in `site/.vercel/`, which is gitignored along with the rest of `site/`), then `npx vercel@59.7.0 deploy --prod --yes` per release. The generator is the source of truth; automating build+deploy in CI is a queued follow-up (brief 08).
+The site is static, compiled from the committed store by `bluedot-atlas site`. **Deploys are automatic**: merging to `main` runs `.github/workflows/deploy.yml`, which tests, rebuilds, and publishes to production (decision [2026-09-04](docs/decisions/2026-09-04-ci-build-and-deploy.md)). The conformed JSONL vintages are in `data/`, so a fresh clone builds the whole site with no credentials; `site/` and the parquet are derived and gitignored. Deploy from a laptop only during a Vercel outage.
 
 ## Layout
 
@@ -49,6 +49,6 @@ cargo test && cargo clippy --all-targets -- -D warnings   # offline; fixtures un
 
 ## Snapshots
 
-`snapshots/` is the committed archive of dated source pulls (entities + claims JSON Lines) for the [Data Center Atlas](docs/atlas/data-centers/PLAN.md). A GitHub Actions workflow ([snapshot.yml](.github/workflows/snapshot.yml)) re-pulls EPA ECHO and the Prince William County layers on the 1st of each month and opens a PR with the new vintages — merging it is the archival act. To fold archived snapshots into your local store: `cp -n snapshots/entities/* data/entities/ && cp -n snapshots/claims/* data/claims/ && cp -n snapshots/geometry/* data/geometry/`, then re-run `build-facts` (`-n` skips files you already have; if a same-vintage file slips in twice, the duplicate-key check refuses loudly — that's the guard working).
+`snapshots/` holds the first months of dated source pulls, kept as history: it is **superseded** by the committed store, whose `data/` vintages are the same append-only archive with nothing to fold in. The monthly [snapshot workflow](.github/workflows/snapshot.yml) now re-pulls EPA ECHO and the Prince William County layers on the 1st of each month straight into `data/` and opens a PR; merging it advances the store *and* redeploys the site, so the atlas refreshes without a local step.
 
 Run everything from the repo root: the engine writes to `./data/` and the Python steps read from it. `uv` downloads and manages Python 3.13 itself; if you use pyenv, note that `atlas/.python-version` makes a bare `python3` inside `atlas/` complain — use `uv run`.

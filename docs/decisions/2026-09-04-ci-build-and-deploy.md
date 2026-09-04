@@ -1,6 +1,6 @@
 # The conformed store is committed, and CI compiles and deploys the site
 
-**Date:** 2026-09-04 · **Status:** Proposed · **Scope:** deployment pipeline + what lives in git · **Brief:** docs/briefs/08-site-v0.md queued this follow-up ("moving the build+deploy into CI").
+**Date:** 2026-09-04 · **Status:** Accepted (PR #16 merged 2026-09-04) · **Scope:** deployment pipeline + what lives in git · **Brief:** docs/briefs/08-site-v0.md queued this follow-up ("moving the build+deploy into CI").
 
 Commit the conformed JSONL store (`data/facts|entities|claims|geometry/`,
 ~43MB today) to the repo, and let GitHub Actions rebuild and deploy the

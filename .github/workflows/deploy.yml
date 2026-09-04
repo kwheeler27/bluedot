@@ -19,7 +19,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Deploys are automatic now, so the suites that used to be a judgment call
+  # before shipping are a gate instead: nothing reaches production unless the
+  # engine and the compilers still pass their own tests.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.7"
+      - run: cargo test -p bluedot
+      - name: Python suites
+        working-directory: atlas
+        run: uv run python -m unittest discover -s tests -q
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
