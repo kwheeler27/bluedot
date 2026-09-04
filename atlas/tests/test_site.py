@@ -122,7 +122,7 @@ class SiteBuildTests(unittest.TestCase):
         cls.data.mkdir()
         _mini_store(cls.data)
         with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
-            build_site(cls.data, cls.out)
+            build_site(cls.data, cls.out, geo_dir=None)
 
     @classmethod
     def tearDownClass(cls):
@@ -185,7 +185,7 @@ class SiteBuildTests(unittest.TestCase):
         keep = self.out / ".vercel-keep.json"
         keep.write_text("{}", encoding="utf-8")
         with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
-            build_site(self.data, self.out)
+            build_site(self.data, self.out, geo_dir=None)
         self.assertFalse(stale.exists(), "stale page must be pruned")
         self.assertTrue(keep.exists(), "non-HTML files must survive")
         after = {p: p.read_bytes() for p in self.out.rglob("*.html")}
@@ -207,13 +207,20 @@ class FailLoudlyTests(unittest.TestCase):
         data, out = self._fresh(ghost_claim=True)
         with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
             with self.assertRaisesRegex(SystemExit, "ghost/1"):
-                build_site(data, out)
+                build_site(data, out, geo_dir=None)
+
+
+    def test_missing_geo_fixtures_stop_the_build(self):
+        data, out = self._fresh()
+        with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
+            with self.assertRaisesRegex(SystemExit, "display geometry"):
+                build_site(data, out, geo_dir=Path("definitely-not-a-real-geo-dir"))
 
     def test_source_with_no_claims_stops_the_build(self):
         data, out = self._fresh(include_echo=False)
         with patch.object(site, "CURATED_FACTS", [("geoId/99", "pep:POPESTIMATE", "2022-07-01")]):
             with self.assertRaisesRegex(SystemExit, "epa/echo/air"):
-                build_site(data, out)
+                build_site(data, out, geo_dir=None)
 
 
 class FilenameTests(unittest.TestCase):
