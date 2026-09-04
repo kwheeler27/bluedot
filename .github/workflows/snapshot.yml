@@ -4,6 +4,12 @@
 # county GIS are public), and `main` branch protection means each snapshot
 # arrives as a reviewable PR rather than a silent push. Vintages are UTC-dated
 # by the engine; a re-run in the same month force-updates the same PR branch.
+#
+# Ingest writes straight into the committed store (`data/`), so merging the PR
+# advances the store and `deploy.yml` publishes the result — the cadence loop
+# closes without a laptop (decision 2026-09-04). The older `snapshots/` archive
+# is superseded by the store's own append-only vintages and is kept only as
+# history; nothing writes to it any more.
 name: monthly-snapshots
 
 on:
@@ -27,10 +33,10 @@ jobs:
 
       # The runner image ships a current stable Rust toolchain; the build is
       # small enough (~4 deps) that caching isn't worth its complexity monthly.
-      - name: Ingest sources into snapshots/
+      - name: Ingest sources into the store
         run: |
-          cargo run --release -p bluedot -- ingest echo --out snapshots
-          cargo run --release -p bluedot -- ingest pwc --out snapshots
+          cargo run --release -p bluedot -- ingest echo --out data
+          cargo run --release -p bluedot -- ingest pwc --out data
 
       - name: Open snapshot PR
         env:
@@ -42,9 +48,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add snapshots
+          git add data
           if git diff --cached --quiet; then
-            echo "sources returned byte-identical snapshots; nothing to archive"
+            echo "sources returned byte-identical vintages; nothing to archive"
             exit 0
           fi
           git commit -m "Monthly source snapshots (${stamp})" \
@@ -52,5 +58,5 @@ jobs:
           git push --force origin "HEAD:refs/heads/${branch}"
           gh pr create --base main --head "$branch" \
             --title "Monthly source snapshots (${stamp})" \
-            --body "Automated monthly snapshots of the Data Center Atlas sources into \`snapshots/\` — dated vintages of entities + claims, the raw material for pipeline history (plan DC-1). Review the diff (new/changed stage claims are the news) and merge to archive. To fold into a local store: \`cp -n snapshots/entities/* data/entities/ && cp -n snapshots/claims/* data/claims/ && cp -n snapshots/geometry/* data/geometry/\` then \`uv run --project atlas bluedot-atlas build-facts\`." \
+            --body "Automated monthly vintages of the Data Center Atlas sources, ingested straight into the committed store (\`data/entities|claims|geometry\`). Review the diff — new and changed stage claims are the news — and merge: \`deploy.yml\` then rebuilds and publishes the site, so the map's land bays and every dossier advance with this vintage. No local step required." \
             || echo "PR already exists for ${branch} — branch force-updated"

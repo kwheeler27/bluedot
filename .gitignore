@@ -13,8 +13,11 @@ build/
 .ruff_cache/
 .mypy_cache/
 
-# Data — raw downloads, Parquet, DuckDB files live here, never in git
-/data/
+# Data — conformed JSONL vintages ARE committed (the repo is the source of
+# truth; a fresh clone must build the site — decision 2026-09-04). Derived
+# artifacts are not: parquet is rebuilt by build-facts, pages by the compiler.
+data/**/*.parquet
+data/pages/
 *.duckdb
 *.duckdb.wal
 

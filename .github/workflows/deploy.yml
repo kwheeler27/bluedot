@@ -1,0 +1,65 @@
+# Compile and deploy the site on every push to main (decision
+# 2026-09-04-ci-build-and-deploy).
+#
+# Compile-only: the conformed store is committed, so this workflow never
+# touches a source API and never needs an ingest key. The one secret is
+# VERCEL_TOKEN, scoped to the bluedot project.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  # Deploys are automatic now, so the suites that used to be a judgment call
+  # before shipping are a gate instead: nothing reaches production unless the
+  # engine and the compilers still pass their own tests.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.7"
+      - run: cargo test -p bluedot
+      - name: Python suites
+        working-directory: atlas
+        run: uv run python -m unittest discover -s tests -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.7"
+      - name: Build the fact store
+        run: uv run --project atlas bluedot-atlas build-facts
+      - name: Compile the site
+        run: uv run --project atlas bluedot-atlas site
+      - name: Check the deploy credential
+        # A missing secret should say so in one line, not surface as a
+        # cryptic Vercel CLI error twenty lines into a log.
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::VERCEL_TOKEN is not set. Create a token scoped to the bluedot project (Vercel → Settings → Tokens) and add it as a repository secret. The site build above succeeded; only the deploy is blocked."
+            exit 1
+          fi
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy to production
+        # Pinned: 59.10.0 is broken ("fetch failed"); 59.7.0 is the known-good line.
+        run: npx -y vercel@59.7.0 deploy --prod --yes --token "$VERCEL_TOKEN" --cwd site
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
