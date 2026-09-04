@@ -15,6 +15,7 @@ the geometry files in geo/ are display fixtures, not claims.
 
 import html
 import json
+import math
 from pathlib import Path
 from string import Template
 
@@ -178,7 +179,7 @@ PAGE = Template("""<!doctype html>
 <script>
 var TOPO = $topo;
 var REGION = $region;
-var CAMPI = $campi;
+var CAMPI = $campi; // [name, status, plannedGFA, dossier slug, planar rings]
 var PTS = $pts; // [lon, lat, bucket, stage, src, name, slug, gfa]
 var TOWNS = [[-77.4753,38.7509,"Manassas"],[-77.6155,38.7959,"Gainesville"],
   [-77.6361,38.8123,"Haymarket"],[-77.2611,38.6582,"Woodbridge"],
@@ -379,7 +380,7 @@ function openDossier(slug) { window.location.href = slug + ".html"; }
         tp.show(evt, c[0], ["campus land bay · " + c[1] + (c[2] > 0 ? " · " + fmtSqft(c[2]) + " planned" : ""), "open dossier ↗"]);
       })
       .on("mouseleave", tp.hide)
-      .on("click", function () { openDossier("pwc-campus-" + c[3]); });
+      .on("click", function () { openDossier(c[3]); });
   });
   // the buildings the county has on record, as dots over the land
   PTS.filter(function (p) { return p[6].indexOf("pwc-bld-") === 0; }).forEach(function (p) {
@@ -421,7 +422,7 @@ def build_map_page(con, geo_dir: Path, slugs: dict[str, str], as_of: str) -> str
     """Render dc/map.html. `con` has the claims/entities views; `slugs` is the
     dossier slug per entity (the map must never link to a page that does not
     exist this build)."""
-    for name in ("us-counties-topo.json", "pwc-region-planar.json", "pwc-campus-planar.json"):
+    for name in ("us-counties-topo.json", "pwc-region-planar.json"):
         if not (geo_dir / name).exists():
             raise SystemExit(f"{geo_dir / name} not found — display geometry fixtures are required for the map page")
 
@@ -458,23 +459,64 @@ def build_map_page(con, geo_dir: Path, slugs: dict[str, str], as_of: str) -> str
             name[:52], slug, int(gfa),
         ])
 
-    campi = json.loads((geo_dir / "pwc-campus-planar.json").read_text())
-    bad_status = sorted({c[1] for c in campi} - {"planned", "pending", "completed"})
-    if bad_status:
-        raise SystemExit(
-            f"campus land-bay status(es) {bad_status} not in the display vocabulary — "
-            "verify against the county layer and extend deliberately"
-        )
     region = json.loads((geo_dir / "pwc-region-planar.json").read_text())
     kx_lat = region.get("kx_lat")
     if not isinstance(kx_lat, (int, float)):
         raise SystemExit("pwc-region-planar.json is missing kx_lat — the flattening latitude must travel with the fixture")
-    missing = [c[3] for c in campi if f"pwc/campus/{c[3]}" not in slugs]
-    if missing:
+
+    # Campus land bays come from the store (brief 09): geometry at the latest
+    # vintage, joined to the registry for the name and to claims for status
+    # and planned floor area. Land bays, dossiers, and snapshots move together
+    # by construction now — no fixture to drift.
+    has_geometry = con.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'geometry'"
+    ).fetchone()[0]
+    if not has_geometry:
         raise SystemExit(
-            f"{len(missing)} campus land bays have no dossier in this build (e.g. {missing[:3]}) — "
-            "re-run `bluedot ingest pwc` + build-facts so the store matches geo/pwc-campus-planar.json"
+            "no geometry table — run `bluedot ingest pwc` then `bluedot-atlas build-facts` "
+            "(data/geometry.parquet feeds the map's land bays)"
         )
+    kx = math.cos(math.radians(kx_lat))
+    campus_rows = con.execute(
+        """
+        WITH latest AS (SELECT max(vintage) v FROM geometry WHERE source_dataset = 'pwcva/build-out-analysis'),
+        g AS (SELECT entity_id, rings FROM geometry, latest WHERE vintage = latest.v),
+        nm AS (SELECT entity_id, name, row_number() OVER (PARTITION BY entity_id ORDER BY vintage DESC) rn
+               FROM entities),
+        st AS (SELECT entity_id, value_text AS stage,
+                      row_number() OVER (PARTITION BY entity_id ORDER BY vintage DESC) rn
+               FROM claims WHERE attribute_id = 'dc:stage'),
+        pg AS (SELECT entity_id, max(value_num) gfa FROM claims
+               WHERE attribute_id = 'dc:gfa_planned_sqft' GROUP BY 1)
+        SELECT g.entity_id, g.rings, nm.name, st.stage, coalesce(pg.gfa, 0)
+        FROM g
+        LEFT JOIN nm ON g.entity_id = nm.entity_id AND nm.rn = 1
+        LEFT JOIN st ON g.entity_id = st.entity_id AND st.rn = 1
+        LEFT JOIN pg ON g.entity_id = pg.entity_id
+        ORDER BY g.entity_id
+        """
+    ).fetchall()
+    campi = []
+    for entity_id, rings_json, name, stage, planned in campus_rows:
+        if name is None:
+            raise SystemExit(f"{entity_id} has geometry but no registry row — the store is inconsistent")
+        if stage not in ("planned", "pending", "completed"):
+            raise SystemExit(
+                f"{entity_id}: campus stage {stage!r} not in the land-bay display vocabulary — "
+                "verify against the county layer and extend deliberately"
+            )
+        slug = slugs.get(entity_id)
+        if slug is None:
+            raise SystemExit(f"{entity_id} has geometry but no dossier slug — the map never links a page that does not exist")
+        rings = json.loads(rings_json)
+        planar = []
+        for ring in rings:
+            stride = max(1, len(ring) // 120)  # display simplification, at compile time
+            out = [[round(x * kx, 4), round(-y, 4)] for x, y in ring[::stride]]
+            if out[0] != out[-1]:
+                out.append(out[0])
+            planar.append(out)
+        campi.append([name[:44], stage, int(planned), slug, planar])
 
     def vintage(source: str) -> str:
         got = con.execute(

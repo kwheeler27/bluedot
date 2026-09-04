@@ -7,4 +7,4 @@ new key decisions land here.)
 
 | Date | Decision | Status |
 |---|---|---|
-| 2026-09-02 | [The map ships inside the compiled site: MapLibre over compiled GeoJSON, no framework](2026-09-02-map-rendering-stack.md) | Proposed |
+| 2026-09-02 | [The map ships inside the compiled site: d3-geo over compiled GeoJSON, in Basin's map idiom](2026-09-02-map-rendering-stack.md) | Accepted |

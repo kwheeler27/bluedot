@@ -193,12 +193,17 @@ fn run(key: Option<&str>) -> Result<(), Error> {
             let started = Instant::now();
             let conformed = pwc::Client::new().facilities(&req)?;
             eprintln!(
-                "{}: {} entities, {} claims fetched in {:.1}s",
+                "{}: {} entities, {} claims, {} geometries fetched in {:.1}s",
                 req.vintage(),
                 conformed.entities.len(),
                 conformed.claims.len(),
+                conformed.geometries.len(),
                 started.elapsed().as_secs_f64()
             );
+            let geometry_path = out_dir
+                .join("geometry")
+                .join(format!("{}.jsonl", req.vintage()));
+            jsonl::write_atomic(&geometry_path, &conformed.geometries)?;
             let entities_path = out_dir
                 .join("entities")
                 .join(format!("{}.jsonl", req.vintage()));

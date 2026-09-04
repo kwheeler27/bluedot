@@ -63,10 +63,20 @@ def _store():
            'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-02 12:00:00')
         """
     )
+    con.execute(
+        """CREATE TABLE geometry (entity_id VARCHAR, vintage VARCHAR, source_dataset VARCHAR,
+          rings JSON, retrieved_at TIMESTAMP)"""
+    )
+    con.execute(
+        """INSERT INTO geometry VALUES
+          ('pwc/campus/c1', 'pwc-2026-09-02', 'pwcva/build-out-analysis',
+           '[[[-77.53,38.73],[-77.52,38.73],[-77.52,38.72],[-77.53,38.73]]]',
+           TIMESTAMP '2026-09-02 12:00:00')"""
+    )
     return con
 
 
-def _geo(dir_: Path, campus_status: str = "planned", kx_lat: object = 38.7) -> Path:
+def _geo(dir_: Path, kx_lat: object = 38.7) -> Path:
     ring = [[-60.5, -38.73], [-60.49, -38.73], [-60.49, -38.72], [-60.5, -38.73]]
     (dir_ / "us-counties-topo.json").write_text(json.dumps(
         {"type": "Topology", "objects": {"nation": {}, "states": {}, "counties": {}}, "arcs": []}))
@@ -74,8 +84,6 @@ def _geo(dir_: Path, campus_status: str = "planned", kx_lat: object = 38.7) -> P
     if kx_lat is not None:
         region["kx_lat"] = kx_lat
     (dir_ / "pwc-region-planar.json").write_text(json.dumps(region))
-    (dir_ / "pwc-campus-planar.json").write_text(json.dumps(
-        [["CAMPUS ONE", campus_status, 500000, "c1", [ring]]]))
     return dir_
 
 
@@ -118,12 +126,18 @@ class MapPageTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "no dossier slug"):
             build_map_page(self.con, self.geo, slugs, "2026-09-03")
 
-    def test_unknown_campus_status_stops_the_build(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        geo = _geo(Path(tmp.name), campus_status="Vibes")
-        with self.assertRaisesRegex(SystemExit, "Vibes"):
-            build_map_page(self.con, geo, SLUGS, "2026-09-03")
+    def test_campus_stage_outside_landbay_vocabulary_stops_the_build(self):
+        # 'operating' is a legal display bucket but not a campus land-bay
+        # status — the map must refuse, not render class="undefined".
+        self.con.execute(
+            "UPDATE claims SET value_text = 'operating' WHERE entity_id = 'pwc/campus/c1' AND attribute_id = 'dc:stage'")
+        with self.assertRaisesRegex(SystemExit, "land-bay"):
+            build_map_page(self.con, self.geo, SLUGS, "2026-09-03")
+
+    def test_missing_geometry_table_stops_the_build(self):
+        self.con.execute("DROP TABLE geometry")
+        with self.assertRaisesRegex(SystemExit, "geometry"):
+            build_map_page(self.con, self.geo, SLUGS, "2026-09-03")
 
     def test_missing_kx_lat_stops_the_build(self):
         tmp = tempfile.TemporaryDirectory()

@@ -1,6 +1,6 @@
 # The map ships inside the compiled site: d3-geo over compiled GeoJSON, in Basin's map idiom
 
-**Date:** 2026-09-02 · **Status:** Proposed · **Scope:** Blue Dot rendering (Data Center Atlas first) · **Brief:** docs/briefs/08-site-v0.md (extends it); design deck v2 mockup 02 (the explore canvas) is the *later* stage this deliberately does not decide.
+**Date:** 2026-09-02 · **Status:** Accepted (PR #13 merged 2026-09-04) · **Scope:** Blue Dot rendering (Data Center Atlas first) · **Brief:** docs/briefs/08-site-v0.md (extends it); design deck v2 mockup 02 (the explore canvas) is the *later* stage this deliberately does not decide.
 
 The interactive map is another compiled page: `bluedot-atlas site` bakes the
 entity registry into GeoJSON, and `dc/map.html` renders it with d3-geo +
