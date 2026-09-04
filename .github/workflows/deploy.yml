@@ -46,6 +46,23 @@ jobs:
         run: uv run --project atlas bluedot-atlas build-facts
       - name: Compile the site
         run: uv run --project atlas bluedot-atlas site
+      # QA the exact artifact about to ship. Counting marks is not enough —
+      # this measures painted geometry, so a map that renders nothing (or
+      # collapses onto one point) blocks the deploy instead of publishing.
+      - name: Install the QA browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Map QA
+        run: npm run qa:map
+      - name: Keep the QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: map-qa
+          path: .qa/
+          if-no-files-found: warn
+
       - name: Check the deploy credential
         # A missing secret should say so in one line, not surface as a
         # cryptic Vercel CLI error twenty lines into a log.
