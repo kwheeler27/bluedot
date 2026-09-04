@@ -21,19 +21,19 @@ const siteDir = process.argv[2] ?? "site";
 const page_url = pathToFileURL(resolve(siteDir, "dc/map.html")).href;
 const OUT = ".qa";
 
-// Floors, not exact counts: the store grows, and a QA harness that fails on
-// every new facility teaches people to ignore it. These catch the failure
-// that matters — a frame rendering nothing.
 // Floors, not exact counts: the store grows, and a harness that fails on
 // every new facility teaches people to ignore it. `painted` floors catch the
 // failure that matters — a frame that renders nothing — and `spread` floors
 // catch marks that render collapsed onto one spot.
 const FLOORS = {
-  natDots: { painted: 400, spread: 400 },
-  natGround: { painted: 1, spread: 600 },
-  pwcLand: { painted: 40, spread: 300 },
-  pwcBlds: { painted: 100, spread: 300 },
-  pwcGround: { painted: 1, spread: 400 },
+  natDots: { painted: 400, onCanvas: 400, spread: 400 },
+  natGround: { painted: 1, onCanvas: 1, spread: 600 },
+  // 73 land bays today. The county deletes campuses regularly (three in three
+  // days once), so revisit this floor rather than lowering it in a panic if a
+  // legitimate shrink ever trips it.
+  pwcLand: { painted: 40, onCanvas: 40, spread: 300 },
+  pwcBlds: { painted: 100, onCanvas: 100, spread: 300 },
+  pwcGround: { painted: 1, onCanvas: 1, spread: 400 },
   chips: { count: 5 },
 };
 
@@ -53,9 +53,17 @@ await page.waitForTimeout(1000);
 // version passed it. So every mark class is also measured: how many of
 // them actually paint a non-empty box, and how big the painted region is.
 const measure = () => {
-  const seen = (sel) => {
-    const els = Array.from(document.querySelectorAll(sel));
+  // getBBox() reports raw local geometry and is NOT clipped by the viewBox: a
+  // projection bug that pushes every mark off the visible frame still measures
+  // as fully painted. (That exact bug shipped once — boundaries drawn in
+  // lon/lat degrees, far outside the frame.) So marks are also counted against
+  // the SVG's own viewBox: `onCanvas` is what a human would actually see.
+  const seen = (svgId, cls) => {
+    const svg = document.querySelector(svgId);
+    const vb = svg.viewBox.baseVal;
+    const els = Array.from(svg.querySelectorAll(cls));
     let painted = 0;
+    let onCanvas = 0;
     let box = null;
     for (const el of els) {
       let b;
@@ -66,6 +74,9 @@ const measure = () => {
       }
       if (b.width <= 0 && b.height <= 0) continue;
       painted++;
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      if (cx >= vb.x && cx <= vb.x + vb.width && cy >= vb.y && cy <= vb.y + vb.height) onCanvas++;
       // The accumulator carries w/h (not width/height): mixing the two
       // names made every span NaN, and `NaN < floor` is false, so this
       // check silently never fired. Caught by testing the harness against
@@ -76,15 +87,29 @@ const measure = () => {
       const y1 = box ? Math.max(box.y + box.h, b.y + b.height) : b.y + b.height;
       box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     }
-    return { count: els.length, painted, w: Math.round(box?.w ?? 0), h: Math.round(box?.h ?? 0) };
+    return {
+      count: els.length,
+      painted,
+      onCanvas,
+      w: Math.round(box?.w ?? 0),
+      h: Math.round(box?.h ?? 0),
+    };
   };
+  // Land bays are also counted per status class: unioning them would let a
+  // broken status dispatch (every campus rendered "planned") pass unnoticed.
+  const landClasses = ["m-land-built", "m-land-pend", "m-land-plan"]
+    .map((c) => document.querySelectorAll(`#pwc .${c}`).length)
+    .filter((n) => n > 0).length;
   return {
-    natDots: seen("#nat .m-dot"),
-    natGround: seen("#nat .m-county"),
-    pwcLand: seen("#pwc [class^='m-land']"),
-    pwcBlds: seen("#pwc .m-bld"),
-    pwcGround: seen("#pwc .m-study"),
-    chips: { count: document.querySelectorAll(".chip").length, painted: 0, w: 0, h: 0 },
+    natDots: seen("#nat", ".m-dot"),
+    natGround: seen("#nat", ".m-county"),
+    pwcLand: seen("#pwc", "[class^='m-land']"),
+    pwcBlds: seen("#pwc", ".m-bld"),
+    pwcGround: seen("#pwc", ".m-study"),
+    // Chips are HTML, not SVG: only their count is meaningful. The zeroes are
+    // placeholders — never give this entry a painted/spread floor, it can't pass.
+    chips: { count: document.querySelectorAll(".chip").length, painted: 0, onCanvas: 0, w: 0, h: 0 },
+    landClasses,
   };
 };
 const counts = await page.evaluate(measure);
@@ -111,6 +136,12 @@ for (const [key, floor] of Object.entries(FLOORS)) {
   if (floor.count !== undefined && m.count < floor.count) {
     failures.push(`${key}: ${m.count} elements, expected at least ${floor.count}`);
   }
+  if (floor.onCanvas !== undefined && m.onCanvas < floor.onCanvas) {
+    failures.push(
+      `${key}: only ${m.onCanvas} of ${m.painted} painted marks land inside the frame ` +
+        `(expected at least ${floor.onCanvas}) — drawn off-canvas, invisible to a reader`
+    );
+  }
   if (floor.painted !== undefined && m.painted < floor.painted) {
     failures.push(
       `${key}: only ${m.painted} of ${m.count} marks actually paint anything ` +
@@ -122,14 +153,20 @@ for (const [key, floor] of Object.entries(FLOORS)) {
     failures.push(`${key}: painted region is ${m.w}x${m.h}, collapsed or unmeasurable (expected a span of ${floor.spread}+)`);
   }
 }
+if (counts.landClasses < 2) {
+  failures.push(
+    `land bays render only ${counts.landClasses} distinct status class — the status dispatch collapsed`
+  );
+}
 if (!tipText.trim()) failures.push("hovering a building produced no tooltip");
 if (faded === 0) failures.push("the hero chip faded nothing — the filter is not wired");
 failures.push(...errors);
 
 const summary = Object.entries(counts)
-  .map(([k, m]) => `${k}=${m.painted}/${m.count}`)
+  .filter(([, m]) => typeof m === "object")
+  .map(([k, m]) => `${k}=${m.onCanvas}/${m.count}`)
   .join(" ");
-console.log(`map QA: ${summary} (painted/present), tooltip=${tipText ? "yes" : "no"}, faded=${faded}`);
+console.log(`map QA: ${summary} (on-canvas/present), landClasses=${counts.landClasses}, tooltip=${tipText ? "yes" : "no"}, faded=${faded}`);
 if (failures.length) {
   console.error("map QA FAILED:\n  " + failures.join("\n  "));
   process.exit(1);
