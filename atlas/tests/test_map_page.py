@@ -134,6 +134,44 @@ class MapPageTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "land-bay"):
             build_map_page(self.con, self.geo, SLUGS, "2026-09-03")
 
+    def test_landbay_figures_follow_the_latest_vintage(self):
+        # A campus whose planned GFA is revised DOWN in a newer vintage must
+        # show the new figure — never a max-over-history (review finding).
+        self.con.execute("""
+            INSERT INTO claims VALUES
+              ('pwc/campus/c1', 'dc:gfa_planned_sqft', DATE '2026-09-02', DATE '2026-09-03', 'pwc-2026-09-02',
+               'c1', NULL, 5000000, 'sqft', 'PWC', 'confirmed_by_record', DATE '2026-09-02',
+               'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-02 12:00:00'),
+              ('pwc/campus/c1', 'dc:stage', DATE '2026-09-05', DATE '2026-09-06', 'pwc-2026-09-05',
+               'c1', 'planned', NULL, NULL, 'PWC', 'confirmed_by_record', DATE '2026-09-05',
+               'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-05 12:00:00'),
+              ('pwc/campus/c1', 'dc:gfa_planned_sqft', DATE '2026-09-05', DATE '2026-09-06', 'pwc-2026-09-05',
+               'c1', NULL, 100000, 'sqft', 'PWC', 'confirmed_by_record', DATE '2026-09-05',
+               'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-05 12:00:00'),
+              ('pwc/site/s1', 'dc:zoning_status', DATE '2026-09-05', DATE '2026-09-06', 'pwc-2026-09-05',
+               'Z1', 'approved', NULL, NULL, 'PWC', 'confirmed_by_record', DATE '2026-09-05',
+               'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-05 12:00:00'),
+              ('pwc/site/s1', 'dc:gfa_planned_sqft', DATE '2026-09-05', DATE '2026-09-06', 'pwc-2026-09-05',
+               'Z1', NULL, 1200000, 'sqft', 'PWC', 'confirmed_by_record', DATE '2026-09-05',
+               'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-05 12:00:00'),
+              ('pwc/bld/b1', 'dc:stage', DATE '2026-09-05', DATE '2026-09-06', 'pwc-2026-09-05',
+               'b1', 'completed', NULL, NULL, 'PWC', 'confirmed_by_record', DATE '2026-09-05',
+               'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-05 12:00:00'),
+              ('pwc/bld/b1', 'dc:gfa_sqft', DATE '2026-09-05', DATE '2026-09-06', 'pwc-2026-09-05',
+               'b1', NULL, 200000, 'sqft', 'PWC', 'confirmed_by_record', DATE '2026-09-05',
+               'pwcva/build-out-analysis', 'https://x', TIMESTAMP '2026-09-05 12:00:00')
+        """)
+        self.con.execute("""
+            INSERT INTO geometry VALUES
+              ('pwc/campus/c1', 'pwc-2026-09-05', 'pwcva/build-out-analysis',
+               '[[[-77.53,38.73],[-77.52,38.73],[-77.52,38.72],[-77.53,38.73]]]',
+               TIMESTAMP '2026-09-05 12:00:00')
+        """)
+        out = build_map_page(self.con, self.geo, SLUGS, "2026-09-05")
+        m = re.search(r"var CAMPI = (.*?);(?: //|\n)", out)
+        campi = json.loads(m.group(1).replace("\\u003c", "<"))
+        self.assertEqual(campi[0][2], 100000, "the revised-down figure must win")
+
     def test_missing_geometry_table_stops_the_build(self):
         self.con.execute("DROP TABLE geometry")
         with self.assertRaisesRegex(SystemExit, "geometry"):

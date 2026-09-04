@@ -323,6 +323,9 @@ fn conform_layer(
                         let (Some(x), Some(y)) = (v[0].as_f64(), v[1].as_f64()) else {
                             return Err(shape_err(format!("row {}: unparseable ring vertex", i + 1)));
                         };
+                        // Defensive: JSON numbers cannot encode NaN/Inf, so
+                        // this is unreachable via valid JSON — kept as a
+                        // cheap invariant, not tested behavior.
                         if !x.is_finite() || !y.is_finite() {
                             return Err(shape_err(format!("row {}: non-finite ring vertex", i + 1)));
                         }
@@ -855,6 +858,13 @@ mod tests {
         assert!(
             matches!(&bad_workclass, Error::BadResponseShape { detail, .. } if detail.contains("workclass")),
             "{bad_workclass}"
+        );
+
+        // a campus ring vertex the source corrupted must refuse, not skew
+        let bad_vertex = err(&b, &c.replacen("[[[", "[[[\"x\",", 1), &s);
+        assert!(
+            matches!(&bad_vertex, Error::BadResponseShape { detail, .. } if detail.contains("unparseable ring vertex")),
+            "{bad_vertex}"
         );
 
         let no_case = err(&b, &c, &s.replacen("ZoningCaseNumber", "ZoningGone", 1));

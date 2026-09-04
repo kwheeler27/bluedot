@@ -52,5 +52,5 @@ jobs:
           git push --force origin "HEAD:refs/heads/${branch}"
           gh pr create --base main --head "$branch" \
             --title "Monthly source snapshots (${stamp})" \
-            --body "Automated monthly snapshots of the Data Center Atlas sources into \`snapshots/\` — dated vintages of entities + claims, the raw material for pipeline history (plan DC-1). Review the diff (new/changed stage claims are the news) and merge to archive. To fold into a local store: \`cp -n snapshots/entities/* data/entities/ && cp -n snapshots/claims/* data/claims/\` then \`uv run --project atlas bluedot-atlas build-facts\`." \
+            --body "Automated monthly snapshots of the Data Center Atlas sources into \`snapshots/\` — dated vintages of entities + claims, the raw material for pipeline history (plan DC-1). Review the diff (new/changed stage claims are the news) and merge to archive. To fold into a local store: \`cp -n snapshots/entities/* data/entities/ && cp -n snapshots/claims/* data/claims/ && cp -n snapshots/geometry/* data/geometry/\` then \`uv run --project atlas bluedot-atlas build-facts\`." \
             || echo "PR already exists for ${branch} — branch force-updated"

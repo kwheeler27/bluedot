@@ -483,15 +483,17 @@ def build_map_page(con, geo_dir: Path, slugs: dict[str, str], as_of: str) -> str
         g AS (SELECT entity_id, rings FROM geometry, latest WHERE vintage = latest.v),
         nm AS (SELECT entity_id, name, row_number() OVER (PARTITION BY entity_id ORDER BY vintage DESC) rn
                FROM entities),
-        st AS (SELECT entity_id, value_text AS stage,
-                      row_number() OVER (PARTITION BY entity_id ORDER BY vintage DESC) rn
-               FROM claims WHERE attribute_id = 'dc:stage'),
-        pg AS (SELECT entity_id, max(value_num) gfa FROM claims
-               WHERE attribute_id = 'dc:gfa_planned_sqft' GROUP BY 1)
+        -- stage and planned GFA are read AT THE SAME VINTAGE as the drawn
+        -- geometry (the same conform run emits all three) — never a
+        -- max-over-history that would keep a revised-down figure alive
+        st AS (SELECT entity_id, value_text AS stage FROM claims, latest
+               WHERE attribute_id = 'dc:stage' AND vintage = latest.v),
+        pg AS (SELECT entity_id, max(value_num) gfa FROM claims, latest
+               WHERE attribute_id = 'dc:gfa_planned_sqft' AND vintage = latest.v GROUP BY 1)
         SELECT g.entity_id, g.rings, nm.name, st.stage, coalesce(pg.gfa, 0)
         FROM g
         LEFT JOIN nm ON g.entity_id = nm.entity_id AND nm.rn = 1
-        LEFT JOIN st ON g.entity_id = st.entity_id AND st.rn = 1
+        LEFT JOIN st ON g.entity_id = st.entity_id
         LEFT JOIN pg ON g.entity_id = pg.entity_id
         ORDER BY g.entity_id
         """
